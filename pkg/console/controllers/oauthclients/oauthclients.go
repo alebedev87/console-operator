@@ -3,18 +3,22 @@ package oauthclients
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1informers "k8s.io/client-go/informers/core/v1"
+	coreclientv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	configv1 "github.com/openshift/api/config/v1"
 	operatorv1 "github.com/openshift/api/operator/v1"
+	configclientv1 "github.com/openshift/client-go/config/clientset/versioned/typed/config/v1"
+	configinformer "github.com/openshift/client-go/config/informers/externalversions"
 	configv1informers "github.com/openshift/client-go/config/informers/externalversions/config/v1"
 	configv1lister "github.com/openshift/client-go/config/listers/config/v1"
 	oauthclient "github.com/openshift/client-go/oauth/clientset/versioned"
@@ -45,9 +49,12 @@ import (
 //		- type=OAuthClientSyncProgressing
 //		- type=OAuthClientSyncDegraded
 type oauthClientsController struct {
-	oauthClient    oauthv1client.OAuthClientsGetter
-	operatorClient v1helpers.OperatorClient
+	// clients
+	oauthClient     oauthv1client.OAuthClientsGetter
+	operatorClient  v1helpers.OperatorClient
+	configMapClient coreclientv1.ConfigMapsGetter
 
+	// listers
 	oauthClientLister           oauthv1lister.OAuthClientLister
 	oauthClientSwitchedInformer *util.InformerWithSwitch
 	authnLister                 configv1lister.AuthenticationLister
@@ -55,16 +62,23 @@ type oauthClientsController struct {
 	routesLister                routev1listers.RouteLister
 	ingressConfigLister         configv1lister.IngressLister
 	targetNSSecretsLister       corev1listers.SecretLister
+	infrastructureConfigLister  configv1lister.InfrastructureLister
+	clusterVersionLister        configv1lister.ClusterVersionLister
+	configMapLister             corev1listers.ConfigMapLister
 }
 
 func NewOAuthClientsController(
 	operatorClient v1helpers.OperatorClient,
 	oauthClient oauthclient.Interface,
+	configClient configclientv1.ConfigV1Interface,
+	configMapClient coreclientv1.ConfigMapsGetter,
+	configInformer configinformer.SharedInformerFactory,
 	authnInformer configv1informers.AuthenticationInformer,
 	consoleOperatorInformer operatorv1informers.ConsoleInformer,
 	routeInformer routev1informers.RouteInformer,
 	ingressConfigInformer configv1informers.IngressInformer,
 	targetNSsecretsInformer corev1informers.SecretInformer,
+	configMapsInformer corev1informers.ConfigMapInformer,
 	oauthClientSwitchedInformer *util.InformerWithSwitch,
 	recorder events.Recorder,
 ) factory.Controller {
@@ -79,6 +93,9 @@ func NewOAuthClientsController(
 		routesLister:                routeInformer.Lister(),
 		ingressConfigLister:         ingressConfigInformer.Lister(),
 		targetNSSecretsLister:       targetNSsecretsInformer.Lister(),
+		configMapLister:             configMapsInformer.Lister(),
+		infrastructureConfigLister:  configInformer.Config().V1().Infrastructures().Lister(),
+		clusterVersionLister:        configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
 	return factory.New().
@@ -108,6 +125,22 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
 
+	infrastructureConfig, err := c.infrastructureConfigLister.Get(api.ConfigResourceName)
+	if err != nil {
+		klog.Errorf("infrastructure config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
+	if err != nil {
+		klog.Errorf("cluster version config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	// Use the console base address from the config as the console URL
+	// if the ingress capability is disabled on external controlplane topology (hypershift).
+	ingressDisabled := util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig)
+
 	authnConfig, err := c.authnLister.Get(api.ConfigResourceName)
 	if err != nil {
 		return err
@@ -131,15 +164,26 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 		return err
 	}
 
-	routeName := api.OpenShiftConsoleRouteName
-	routeConfig := routesub.NewRouteConfig(operatorConfig, ingressConfig, routeName)
-	if routeConfig.IsCustomHostnameSet() {
-		routeName = api.OpenshiftConsoleCustomRouteName
-	}
+	var consoleURL *url.URL
 
-	_, consoleURL, _, routeErr := routesub.GetActiveRouteInfo(c.routesLister, routeName)
-	if routeErr != nil {
-		return routeErr
+	if !ingressDisabled {
+		routeName := api.OpenShiftConsoleRouteName
+		routeConfig := routesub.NewRouteConfig(operatorConfig, ingressConfig, routeName)
+		if routeConfig.IsCustomHostnameSet() {
+			routeName = api.OpenshiftConsoleCustomRouteName
+		}
+
+		_, url, _, routeErr := routesub.GetActiveRouteInfo(c.routesLister, routeName)
+		if routeErr != nil {
+			return routeErr
+		}
+		consoleURL = url
+	} else {
+		url, err := util.GetConsoleBaseAddress(ctx, c.configMapLister)
+		if err != nil {
+			return fmt.Errorf("failed to get console base address: %w", err)
+		}
+		consoleURL = url
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

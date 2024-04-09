@@ -261,11 +261,15 @@ func RunOperator(ctx context.Context, controllerContext *controllercmd.Controlle
 	oauthClientController := oauthclients.NewOAuthClientsController(
 		operatorClient,
 		oauthClient,
+		configClient.ConfigV1(),
+		kubeClient.CoreV1(),
+		configInformers,
 		configInformers.Config().V1().Authentications(),
 		operatorConfigInformers.Operator().V1().Consoles(),
 		routesInformersNamespaced.Route().V1().Routes(),
 		configInformers.Config().V1().Ingresses(),
 		kubeInformersNamespaced.Core().V1().Secrets(),
+		kubeInformersNamespaced.Core().V1().ConfigMaps(),
 		oauthClientsSwitchedInformer,
 		recorder,
 	)

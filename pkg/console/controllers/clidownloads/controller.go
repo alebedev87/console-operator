@@ -35,7 +35,7 @@ import (
 	consoleclientv1 "github.com/openshift/client-go/console/clientset/versioned/typed/console/v1"
 	routeclientv1 "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
 
-	// operator
+	// console-operator
 	"github.com/openshift/console-operator/pkg/api"
 	controllersutil "github.com/openshift/console-operator/pkg/console/controllers/util"
 	"github.com/openshift/console-operator/pkg/console/status"
@@ -50,6 +50,11 @@ type CLIDownloadsSyncController struct {
 	ingressClient             configclientv1.IngressInterface
 	routeClient               routeclientv1.RoutesGetter
 	operatorConfigLister      operatorv1listers.ConsoleLister
+	// listers
+	ingressConfigLister        configlistersv1.IngressLister
+	operatorConfigLister       operatorv1listers.ConsoleLister
+	infrastructureConfigLister configlistersv1.InfrastructureLister
+	clusterVersionLister       configlistersv1.ClusterVersionLister
 }
 
 func NewCLIDownloadsSyncController(
@@ -75,6 +80,11 @@ func NewCLIDownloadsSyncController(
 		ingressClient:             configClient.Ingresses(),
 		routeClient:               routeClient,
 		operatorConfigLister:      operatorConfigInformer.Lister(),
+		// listers
+		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
+		operatorConfigLister:       operatorConfigInformer.Lister(),
+		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
+		clusterVersionLister:       configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
 	configV1Informers := configInformer.Config().V1()
@@ -114,8 +124,27 @@ func (c *CLIDownloadsSyncController) Sync(ctx context.Context, controllerContext
 	}
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
-	ingressConfig, err := c.ingressClient.Get(ctx, api.ConfigResourceName, metav1.GetOptions{})
+
+	infrastructureConfig, err := c.infrastructureConfigLister.Get(api.ConfigResourceName)
 	if err != nil {
+		klog.Errorf("infrastructure config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
+	if err != nil {
+		klog.Errorf("cluster version config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	// Disable the client download check for external control plane topology (hypershift) if the ingress capability is disabled.
+	if controllersutil.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig) {
+		return statusHandler.FlushAndReturn(nil)
+	}
+
+	ingressConfig, err := c.ingressConfigLister.Get(api.ConfigResourceName)
+	if err != nil {
+		klog.Errorf("ingress config error: %v", err)
 		return statusHandler.FlushAndReturn(err)
 	}
 

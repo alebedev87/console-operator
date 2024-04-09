@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	// k8s
@@ -41,11 +42,15 @@ import (
 type HealthCheckController struct {
 	// clients
 	operatorClient       v1helpers.OperatorClient
-	operatorConfigLister operatorv1listers.ConsoleLister
 	infrastructureClient configclientv1.InfrastructureInterface
 	ingressClient        configclientv1.IngressInterface
 	routeClient          routeclientv1.RoutesGetter
 	configMapClient      coreclientv1.ConfigMapsGetter
+	// listers
+	infrastructureConfigLister configlistersv1.InfrastructureLister
+	ingressConfigLister        configlistersv1.IngressLister
+	operatorConfigLister       operatorv1listers.ConsoleLister
+	clusterVersionLister       configlistersv1.ClusterVersionLister
 }
 
 func NewHealthCheckController(
@@ -64,12 +69,18 @@ func NewHealthCheckController(
 	recorder events.Recorder,
 ) factory.Controller {
 	ctrl := &HealthCheckController{
+		// clients
 		operatorClient:       operatorClient,
 		operatorConfigLister: operatorConfigInformer.Lister(),
 		infrastructureClient: configClient.Infrastructures(),
 		ingressClient:        configClient.Ingresses(),
 		routeClient:          routev1Client,
 		configMapClient:      configMapClient,
+		// listers
+		operatorConfigLister:       operatorConfigInformer.Lister(),
+		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
+		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
+		clusterVersionLister:       configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
 	configMapInformer := coreInformer.ConfigMaps()
@@ -130,6 +141,16 @@ func (c *HealthCheckController) Sync(ctx context.Context, controllerContext fact
 		return nil
 	}
 
+	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
+	if err != nil {
+		klog.Errorf("cluster version config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	// Use the console base address from the config as the ingress URI
+	// if the ingress capability is disabled on external controlplane topology (hypershift).
+	ingressDisabled := util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig)
+
 	activeRouteName := api.OpenShiftConsoleRouteName
 	routeConfig := routesub.NewRouteConfig(updatedOperatorConfig, ingressConfig, activeRouteName)
 	if routeConfig.IsCustomHostnameSet() {
@@ -142,23 +163,35 @@ func (c *HealthCheckController) Sync(ctx context.Context, controllerContext fact
 		return statusHandler.FlushAndReturn(activeRouteErr)
 	}
 
-	routeHealthCheckErrReason, routeHealthCheckErr := c.CheckRouteHealth(ctx, updatedOperatorConfig, activeRoute)
+	routeHealthCheckErrReason, routeHealthCheckErr := c.CheckRouteHealth(ctx, updatedOperatorConfig, activeRoute, ingressDisabled)
 	statusHandler.AddCondition(status.HandleDegraded("RouteHealth", routeHealthCheckErrReason, routeHealthCheckErr))
 	statusHandler.AddCondition(status.HandleAvailable("RouteHealth", routeHealthCheckErrReason, routeHealthCheckErr))
 
 	return statusHandler.FlushAndReturn(routeHealthCheckErr)
 }
 
-func (c *HealthCheckController) CheckRouteHealth(ctx context.Context, operatorConfig *operatorsv1.Console, route *routev1.Route) (string, error) {
+func (c *HealthCheckController) CheckRouteHealth(ctx context.Context, operatorConfig *operatorsv1.Console, route *routev1.Route, ingressDisabled bool) (string, error) {
 	var reason string
 	err := retry.OnError(
 		retry.DefaultRetry,
 		func(err error) bool { return err != nil },
 		func() error {
-			url, _, err := routeapihelpers.IngressURI(route, route.Spec.Host)
-			if err != nil {
-				reason = "RouteNotAdmitted"
-				return fmt.Errorf("console route is not admitted")
+			var (
+				url *url.URL
+				err error
+			)
+			if ingressDisabled {
+				url, err = util.GetConsoleBaseAddress(ctx, c.configMapLister)
+				if err != nil {
+					reason = "FailedLoadBaseAddress"
+					return fmt.Errorf("failed to get console base address: %w", err)
+				}
+			} else {
+				url, _, err = routeapihelpers.IngressURI(route, route.Spec.Host)
+				if err != nil {
+					reason = "RouteNotAdmitted"
+					return fmt.Errorf("console route is not admitted")
+				}
 			}
 
 			caPool, err := c.getCA(ctx, route.Spec.TLS)
