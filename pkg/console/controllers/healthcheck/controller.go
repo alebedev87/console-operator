@@ -9,7 +9,6 @@ import (
 	"time"
 
 	// k8s
-
 	coreinformersv1 "k8s.io/client-go/informers/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
@@ -40,12 +39,14 @@ import (
 
 type HealthCheckController struct {
 	// clients
-	operatorClient             v1helpers.OperatorClient
+	operatorClient v1helpers.OperatorClient
+	// listers
 	infrastructureConfigLister configlistersv1.InfrastructureLister
 	configMapLister            corev1listers.ConfigMapLister
 	routeLister                routev1listers.RouteLister
 	ingressConfigLister        configlistersv1.IngressLister
 	operatorConfigLister       operatorv1listers.ConsoleLister
+	clusterVersionLister       configlistersv1.ClusterVersionLister
 }
 
 func NewHealthCheckController(
@@ -62,12 +63,15 @@ func NewHealthCheckController(
 	recorder events.Recorder,
 ) factory.Controller {
 	ctrl := &HealthCheckController{
-		operatorClient:             operatorClient,
+		// clients
+		operatorClient: operatorClient,
+		// listers
 		operatorConfigLister:       operatorConfigInformer.Lister(),
 		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
 		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
 		routeLister:                routeInformer.Lister(),
 		configMapLister:            coreInformer.ConfigMaps().Lister(),
+		clusterVersionLister:       configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
 	configMapInformer := coreInformer.ConfigMaps()
@@ -125,6 +129,17 @@ func (c *HealthCheckController) Sync(ctx context.Context, controllerContext fact
 	// Disable the health check for external control plane topology (hypershift) and ingress NLB.
 	// This is to avoid an issue with internal NLB see https://issues.redhat.com/browse/OCPBUGS-23300
 	if isExternalControlPlaneWithNLB(infrastructureConfig, ingressConfig) {
+		return nil
+	}
+
+	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
+	if err != nil {
+		klog.Errorf("cluster version config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	// Disable the health check for external control plane topology (hypershift) if the ingress capability is disabled.
+	if util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig) {
 		return nil
 	}
 

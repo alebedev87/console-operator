@@ -42,9 +42,12 @@ type RouteSyncController struct {
 	// clients
 	operatorClient       v1helpers.OperatorClient
 	routeClient          routeclientv1.RoutesGetter
+	infrastructureClient configclientv1.InfrastructureInterface
+	// listers
 	operatorConfigLister operatorv1listers.ConsoleLister
 	ingressConfigLister  configlistersv1.IngressLister
 	secretLister         corev1listers.SecretLister
+	clusterVersionLister configlistersv1.ClusterVersionLister
 }
 
 func NewRouteSyncController(
@@ -65,11 +68,15 @@ func NewRouteSyncController(
 	ctrl := &RouteSyncController{
 		routeName:            routeName,
 		isHealthCheckEnabled: isHealthCheckEnabled,
+		// clients
 		operatorClient:       operatorClient,
+		routeClient:          routev1Client,
+		infrastructureClient: configClient.Infrastructures(),
+		// listers
 		operatorConfigLister: operatorConfigInformer.Lister(),
 		ingressConfigLister:  configInformer.Config().V1().Ingresses().Lister(),
-		routeClient:          routev1Client,
 		secretLister:         secretInformer.Lister(),
+		clusterVersionLister: configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
 	configV1Informers := configInformer.Config().V1()
@@ -114,8 +121,26 @@ func (c *RouteSyncController) Sync(ctx context.Context, controllerContext factor
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
 
+	infrastructureConfig, err := c.infrastructureClient.Get(ctx, api.ConfigResourceName, metav1.GetOptions{})
+	if err != nil {
+		klog.Errorf("infrastructure config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
+	if err != nil {
+		klog.Errorf("cluster version config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	// Disable the route check for external control plane topology (hypershift) if the ingress capability is disabled.
+	if util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig) {
+		return statusHandler.FlushAndReturn(nil)
+	}
+
 	ingressConfig, err := c.ingressConfigLister.Get(api.ConfigResourceName)
 	if err != nil {
+		klog.Errorf("ingress config error: %v", err)
 		return statusHandler.FlushAndReturn(err)
 	}
 	routeConfig := routesub.NewRouteConfig(updatedOperatorConfig, ingressConfig, c.routeName)

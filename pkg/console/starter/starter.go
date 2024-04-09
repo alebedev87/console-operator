@@ -260,6 +260,8 @@ func RunOperator(ctx context.Context, controllerContext *controllercmd.Controlle
 	oauthClientController := oauthclients.NewOAuthClientsController(
 		operatorClient,
 		oauthClient,
+		configClient.ConfigV1(),
+		configInformers,
 		configInformers.Config().V1().Authentications(),
 		operatorConfigInformers.Operator().V1().Consoles(),
 		routesInformersNamespaced.Route().V1().Routes(),
@@ -400,6 +402,9 @@ func RunOperator(ctx context.Context, controllerContext *controllercmd.Controlle
 		// clients
 		operatorClient,
 		// route
+		routesClient.RouteV1(),
+		kubeClient.CoreV1(),
+		// informers
 		operatorConfigInformers.Operator().V1().Consoles(),
 		configInformers,                     // Config
 		kubeInformersNamespaced.Core().V1(), // `openshift-console` namespace informers

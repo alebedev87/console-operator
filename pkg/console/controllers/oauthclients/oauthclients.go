@@ -15,6 +15,8 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	operatorv1 "github.com/openshift/api/operator/v1"
+	configclientv1 "github.com/openshift/client-go/config/clientset/versioned/typed/config/v1"
+	configinformer "github.com/openshift/client-go/config/informers/externalversions"
 	configv1informers "github.com/openshift/client-go/config/informers/externalversions/config/v1"
 	configv1lister "github.com/openshift/client-go/config/listers/config/v1"
 	oauthclient "github.com/openshift/client-go/oauth/clientset/versioned"
@@ -45,8 +47,9 @@ import (
 //		- type=OAuthClientSyncProgressing
 //		- type=OAuthClientSyncDegraded
 type oauthClientsController struct {
-	oauthClient    oauthv1client.OAuthClientsGetter
-	operatorClient v1helpers.OperatorClient
+	oauthClient          oauthv1client.OAuthClientsGetter
+	operatorClient       v1helpers.OperatorClient
+	infrastructureClient configclientv1.InfrastructureInterface
 
 	oauthClientLister           oauthv1lister.OAuthClientLister
 	oauthClientSwitchedInformer *util.InformerWithSwitch
@@ -55,11 +58,14 @@ type oauthClientsController struct {
 	routesLister                routev1listers.RouteLister
 	ingressConfigLister         configv1lister.IngressLister
 	targetNSSecretsLister       corev1listers.SecretLister
+	clusterVersionLister        configv1lister.ClusterVersionLister
 }
 
 func NewOAuthClientsController(
 	operatorClient v1helpers.OperatorClient,
 	oauthClient oauthclient.Interface,
+	configClient configclientv1.ConfigV1Interface,
+	configInformer configinformer.SharedInformerFactory,
 	authnInformer configv1informers.AuthenticationInformer,
 	consoleOperatorInformer operatorv1informers.ConsoleInformer,
 	routeInformer routev1informers.RouteInformer,
@@ -69,8 +75,9 @@ func NewOAuthClientsController(
 	recorder events.Recorder,
 ) factory.Controller {
 	c := oauthClientsController{
-		oauthClient:    oauthClient.OauthV1(),
-		operatorClient: operatorClient,
+		oauthClient:          oauthClient.OauthV1(),
+		operatorClient:       operatorClient,
+		infrastructureClient: configClient.Infrastructures(),
 
 		oauthClientLister:           oauthClientSwitchedInformer.Lister(),
 		oauthClientSwitchedInformer: oauthClientSwitchedInformer,
@@ -79,6 +86,7 @@ func NewOAuthClientsController(
 		routesLister:                routeInformer.Lister(),
 		ingressConfigLister:         ingressConfigInformer.Lister(),
 		targetNSSecretsLister:       targetNSsecretsInformer.Lister(),
+		clusterVersionLister:        configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
 	return factory.New().
@@ -107,6 +115,24 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 	}
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
+
+	infrastructureConfig, err := c.infrastructureClient.Get(ctx, api.ConfigResourceName, metav1.GetOptions{})
+	if err != nil {
+		klog.Errorf("infrastructure config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
+	if err != nil {
+		klog.Errorf("cluster version config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	// Disable the oauth client update for external control plane topology (hypershift) if the ingress capability is disabled.
+	// HyperShift handles the updating of the oauth client for the console.
+	if util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig) {
+		return statusHandler.FlushAndReturn(nil)
+	}
 
 	authnConfig, err := c.authnLister.Get(api.ConfigResourceName)
 	if err != nil {
