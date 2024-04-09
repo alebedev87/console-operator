@@ -40,11 +40,14 @@ type RouteSyncController struct {
 	routeName            string
 	isHealthCheckEnabled bool
 	// clients
-	operatorClient       v1helpers.OperatorClient
-	routeClient          routeclientv1.RoutesGetter
-	operatorConfigLister operatorv1listers.ConsoleLister
-	ingressConfigLister  configlistersv1.IngressLister
-	secretLister         corev1listers.SecretLister
+	operatorClient v1helpers.OperatorClient
+	routeClient    routeclientv1.RoutesGetter
+	// listers
+	operatorConfigLister       operatorv1listers.ConsoleLister
+	ingressConfigLister        configlistersv1.IngressLister
+	secretLister               corev1listers.SecretLister
+	infrastructureConfigLister configlistersv1.InfrastructureLister
+	clusterVersionLister       configlistersv1.ClusterVersionLister
 }
 
 func NewRouteSyncController(
@@ -65,11 +68,15 @@ func NewRouteSyncController(
 	ctrl := &RouteSyncController{
 		routeName:            routeName,
 		isHealthCheckEnabled: isHealthCheckEnabled,
-		operatorClient:       operatorClient,
-		operatorConfigLister: operatorConfigInformer.Lister(),
-		ingressConfigLister:  configInformer.Config().V1().Ingresses().Lister(),
-		routeClient:          routev1Client,
-		secretLister:         secretInformer.Lister(),
+		// clients
+		operatorClient: operatorClient,
+		routeClient:    routev1Client,
+		// listers
+		operatorConfigLister:       operatorConfigInformer.Lister(),
+		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
+		secretLister:               secretInformer.Lister(),
+		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
+		clusterVersionLister:       configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
 	configV1Informers := configInformer.Config().V1()
@@ -114,8 +121,28 @@ func (c *RouteSyncController) Sync(ctx context.Context, controllerContext factor
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
 
+	infrastructureConfig, err := c.infrastructureConfigLister.Get(api.ConfigResourceName)
+	if err != nil {
+		klog.Errorf("infrastructure config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
+	if err != nil {
+		klog.Errorf("cluster version config error: %v", err)
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	// Disable the route check for external control plane topology (hypershift) if the ingress capability is disabled.
+	// The components will miss the required RBAC to implement the custom hostname or TLS.
+	// Link: https://github.com/openshift/enhancements/blob/f5290a98ea4f23f8e76621806b656a3849c74a17/enhancements/ingress/optional-ingress-hypershift.md#component-routes.
+	if util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig) {
+		return statusHandler.FlushAndReturn(nil)
+	}
+
 	ingressConfig, err := c.ingressConfigLister.Get(api.ConfigResourceName)
 	if err != nil {
+		klog.Errorf("ingress config error: %v", err)
 		return statusHandler.FlushAndReturn(err)
 	}
 	routeConfig := routesub.NewRouteConfig(updatedOperatorConfig, ingressConfig, c.routeName)
