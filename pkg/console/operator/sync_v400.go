@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -31,16 +32,22 @@ import (
 
 	// operator
 	"github.com/openshift/console-operator/pkg/api"
+	ctrlutil "github.com/openshift/console-operator/pkg/console/controllers/util"
 	customerrors "github.com/openshift/console-operator/pkg/console/errors"
 	"github.com/openshift/console-operator/pkg/console/metrics"
 	"github.com/openshift/console-operator/pkg/console/status"
 	configmapsub "github.com/openshift/console-operator/pkg/console/subresource/configmap"
+	serversub "github.com/openshift/console-operator/pkg/console/subresource/consoleserver"
 	deploymentsub "github.com/openshift/console-operator/pkg/console/subresource/deployment"
 	oauthsub "github.com/openshift/console-operator/pkg/console/subresource/oauthclient"
 	routesub "github.com/openshift/console-operator/pkg/console/subresource/route"
 	secretsub "github.com/openshift/console-operator/pkg/console/subresource/secret"
 	utilsub "github.com/openshift/console-operator/pkg/console/subresource/util"
 	telemetry "github.com/openshift/console-operator/pkg/console/telemetry"
+)
+
+const (
+	consoleConfigYamlFile = "console-config.yaml"
 )
 
 // The sync loop starts from zero and works its way through the requirements for a running console.
@@ -50,28 +57,50 @@ import (
 // the loop.
 func (co *consoleOperator) sync_v400(ctx context.Context, controllerContext factory.SyncContext, updatedOperatorConfig *operatorv1.Console, set configSet) error {
 	klog.V(4).Infoln("running sync loop 4.0.0")
-	statusHandler := status.NewStatusHandler(co.operatorClient)
 
-	// track changes, may trigger ripples & update operator config or console config status
-	toUpdate := false
+	var (
+		statusHandler = status.NewStatusHandler(co.operatorClient)
+		// track changes, may trigger ripples & update operator config or console config status
+		toUpdate     = false
+		consoleRoute *routev1.Route
+		consoleURL   *url.URL
+	)
 
-	routeName := api.OpenShiftConsoleRouteName
-	routeConfig := routesub.NewRouteConfig(updatedOperatorConfig, set.Ingress, routeName)
-	if routeConfig.IsCustomHostnameSet() {
-		routeName = api.OpenshiftConsoleCustomRouteName
+	infrastructureConfig, err := co.infrastructureLister.Get(api.ConfigResourceName)
+	if err != nil {
+		return statusHandler.FlushAndReturn(err)
 	}
 
-	route, consoleURL, routeReasoneErr, routeErr := routesub.GetActiveRouteInfo(co.routeLister, routeName)
-	// TODO: this controller is no longer responsible for syncing the route.
-	//   however, the route is essential for several of the components below.
-	//   - the loop should exit early and wait until the RouteSyncController creates the route.
-	//     there is nothing new in this flow, other than 2 controllers now look
-	//     at the same resource.
-	//     - RouteSyncController is responsible for updates
-	//     - ConsoleOperatorController (future ConsoleDeploymentController) is responsible for reads only.
-	statusHandler.AddConditions(status.HandleProgressingOrDegraded("SyncLoopRefresh", routeReasoneErr, routeErr))
-	if routeErr != nil {
-		return statusHandler.FlushAndReturn(routeErr)
+	clusterVersionConfig, err := co.clusterVersionLister.Get("version")
+	if err != nil {
+		return statusHandler.FlushAndReturn(err)
+	}
+
+	// Use the console base address from the config as the console URL
+	// if the ingress capability is disabled on external controlplane topology (hypershift).
+	ingressDisabled := ctrlutil.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig)
+
+	if !ingressDisabled {
+		routeName := api.OpenShiftConsoleRouteName
+		routeConfig := routesub.NewRouteConfig(updatedOperatorConfig, set.Ingress, routeName)
+		if routeConfig.IsCustomHostnameSet() {
+			routeName = api.OpenshiftConsoleCustomRouteName
+		}
+
+		route, url, routeReasonErr, routeErr := routesub.GetActiveRouteInfo(co.routeLister, routeName)
+		// TODO: this controller is no longer responsible for syncing the route.
+		//   however, the route is essential for several of the components below.
+		//   - the loop should exit early and wait until the RouteSyncController creates the route.
+		//     there is nothing new in this flow, other than 2 controllers now look
+		//     at the same resource.
+		//     - RouteSyncController is responsible for updates
+		//     - ConsoleOperatorController (future ConsoleDeploymentController) is responsible for reads only.
+		statusHandler.AddConditions(status.HandleProgressingOrDegraded("SyncLoopRefresh", routeReasonErr, routeErr))
+		if routeErr != nil {
+			return statusHandler.FlushAndReturn(routeErr)
+		}
+		consoleRoute = route
+		consoleURL = url
 	}
 
 	authnConfig, err := co.authnConfigLister.Get(api.ConfigResourceName)
@@ -107,8 +136,9 @@ func (co *consoleOperator) sync_v400(ctx context.Context, controllerContext fact
 		set.OAuth,
 		authServerCAConfig,
 		authnConfig,
-		route,
+		consoleRoute,
 		controllerContext.Recorder(),
+		ingressDisabled,
 	)
 	toUpdate = toUpdate || cmChanged
 	statusHandler.AddConditions(status.HandleProgressingOrDegraded("ConfigMapSync", cmErrReason, cmErr))
@@ -210,22 +240,40 @@ func (co *consoleOperator) sync_v400(ctx context.Context, controllerContext fact
 		return prefix, "", nil
 	}()))
 
-	// if we survive the gauntlet, we need to update the console config with the
-	// public hostname so that the world can know the console is ready to roll
-	klog.V(4).Infoln("sync_v400: updating console status")
-
-	_, consoleConfigErr := co.SyncConsoleConfig(ctx, set.Console, consoleURL.String())
-	statusHandler.AddCondition(status.HandleDegraded("ConsoleConfig", "FailedUpdate", consoleConfigErr))
-	if consoleConfigErr != nil {
-		klog.Errorf("could not update console config status: %v", consoleConfigErr)
-		return statusHandler.FlushAndReturn(consoleConfigErr)
+	// Set the console base address as the console URL if the ingress is disabled.
+	if ingressDisabled {
+		klog.V(4).Infoln("sync_v400: using console base address from config")
+		cfg, err := (&serversub.ConsoleYAMLParser{}).Parse([]byte(cm.Data[consoleConfigYamlFile]))
+		if err != nil {
+			klog.Errorf("could not parse console config: %v", err)
+			return statusHandler.FlushAndReturn(fmt.Errorf("could not parse console config: %w", err))
+		}
+		url, err := url.Parse(cfg.ClusterInfo.ConsoleBaseAddress)
+		if err != nil {
+			klog.Errorf("could not parse console base address: %v", err)
+			return statusHandler.FlushAndReturn(fmt.Errorf("could not parse console base address: %w", err))
+		}
+		consoleURL = url
 	}
 
-	_, _, consolePublicConfigErr := co.SyncConsolePublicConfig(ctx, consoleURL.String(), controllerContext.Recorder())
-	statusHandler.AddCondition(status.HandleDegraded("ConsolePublicConfigMap", "FailedApply", consolePublicConfigErr))
-	if consolePublicConfigErr != nil {
-		klog.Errorf("could not update public console config status: %v", consolePublicConfigErr)
-		return statusHandler.FlushAndReturn(consolePublicConfigErr)
+	if consoleURL != nil {
+		// if we survive the gauntlet, we need to update the console config with the
+		// public hostname so that the world can know the console is ready to roll
+		klog.V(4).Infoln("sync_v400: updating console status")
+
+		_, consoleConfigErr := co.SyncConsoleConfig(ctx, set.Console, consoleURL.String())
+		statusHandler.AddCondition(status.HandleDegraded("ConsoleConfig", "FailedUpdate", consoleConfigErr))
+		if consoleConfigErr != nil {
+			klog.Errorf("could not update console config status: %v", consoleConfigErr)
+			return statusHandler.FlushAndReturn(consoleConfigErr)
+		}
+
+		_, _, consolePublicConfigErr := co.SyncConsolePublicConfig(ctx, consoleURL.String(), controllerContext.Recorder())
+		statusHandler.AddCondition(status.HandleDegraded("ConsolePublicConfigMap", "FailedApply", consolePublicConfigErr))
+		if consolePublicConfigErr != nil {
+			klog.Errorf("could not update public console config status: %v", consolePublicConfigErr)
+			return statusHandler.FlushAndReturn(consolePublicConfigErr)
+		}
 	}
 
 	defer func() {
@@ -325,6 +373,7 @@ func (co *consoleOperator) SyncConfigMap(
 	authConfig *configv1.Authentication,
 	activeConsoleRoute *routev1.Route,
 	recorder events.Recorder,
+	ingressDisabled bool,
 ) (consoleConfigMap *corev1.ConfigMap, changed bool, reason string, err error) {
 
 	managedConfig, mcErr := co.managedNSConfigMapLister.ConfigMaps(api.OpenShiftConfigManagedNamespace).Get(api.OpenShiftConsoleConfigMapName)
@@ -398,6 +447,7 @@ func (co *consoleOperator) SyncConfigMap(
 		nodeOperatingSystems,
 		copiedCSVsDisabled,
 		telemetryConfig,
+		ingressDisabled,
 	)
 	if err != nil {
 		return nil, false, "FailedConsoleConfigBuilder", err

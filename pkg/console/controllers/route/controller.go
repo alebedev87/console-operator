@@ -134,6 +134,8 @@ func (c *RouteSyncController) Sync(ctx context.Context, controllerContext factor
 	}
 
 	// Disable the route check for external control plane topology (hypershift) if the ingress capability is disabled.
+	// The components will miss the required RBAC to implement the custom hostname or TLS.
+	// Link: https://github.com/openshift/enhancements/blob/f5290a98ea4f23f8e76621806b656a3849c74a17/enhancements/ingress/optional-ingress-hypershift.md#component-routes.
 	if util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig) {
 		return statusHandler.FlushAndReturn(nil)
 	}

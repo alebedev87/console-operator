@@ -5,8 +5,8 @@ The use case in mind is [HyperShift hosted clusters where the Ingress capability
 
 ## Requirements
 
-- Ready ROSA HCP OpenShift cluster.
-- [Installed AWS Load Balancer Operator and its controller](https://docs.openshift.com/rosa/networking/aws-load-balancer-operator.html).
+- ROSA HCP OpenShift cluster.
+- [AWS Load Balancer Operator installed and its controller created](https://docs.openshift.com/rosa/networking/aws-load-balancer-operator.html).
 - User logged as a cluster admin.
 
 ## Procedure
@@ -80,15 +80,25 @@ Otherwise the following error is produced:
 
 > middleware.go:60] invalid source origin: invalid Origin or Referer: https://k8s-openshif-console-xxxxxxxxxx-xxxxxxxxx.us-east-2.elb.amazonaws.com expected `https://console-openshift-console.apps.mytestcluster.devcluster.openshift.com/
 
-Edit `console-config` configmap by replacing `clusterInfo.consoleBaseAddress` field with the hostname of the provisioned ALB:
+Create the following configmap in `openshift-config-managed` namespace:
 ```bash
 $ CONSOLE_ALB_HOST=$(oc -n openshift-console get ing console -o yaml | yq .status.loadBalancer.ingress[0].hostname)
-$ oc -n openshift-console edit cm console-config
+$ cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: console
+  name: console-config
+  namespace: openshift-config-managed
+data:
+  console-config.yaml: |
+    apiVersion: console.openshift.io/v1
+    kind: ConsoleConfig
+    clusterInfo:
+      consoleBaseAddress: https://${CONSOLE_ALB_HOST}
+EOF
 ```
-
-**Gaps**
-- The console operator reconciles the console configuration, overriding any changes.
-- The console pods need to be recreated to read the new config.
 
 ### Update console OAuthClient
 
@@ -96,10 +106,6 @@ The console uses a dedicated oauthclient to set the redirect link. We need to ch
 ```bash
 $ oc patch oauthclient console --type='json' -p="[{\"op\": \"replace\", \"path\": \"/redirectURIs/0\", \"value\":\"https://${CONSOLE_ALB_HOST}/auth/callback\"}]"
 ```
-
-**Gaps**
-- The console operator reconciles the console OAuthClient, overriding any changes.
-
 ## Notes
 
 1. ROSA HCP does not have the authentication operator, the authentication server is managed centrally by the HyperShift layer:
@@ -128,7 +134,11 @@ $ oc -n openshift-console rsh deploy/console curl -k https://openshift.default.s
 "token_endpoint": "https://oauth.mytestcluster.5199.s3.devshift.org:443/oauth/token",
 ```
 
-2. To simulate a disabled ingress set the desired replicas to zero in the default ingress controller:
+2. When the ingress capability is disabled, the console operator relies on the console base address for health checks instead of the route.
+
+3. When the ingress capability is disabled, the console operator skips the implementation of the component route customization.
+
+4. To simulate a disabled ingress set the desired replicas to zero in the default ingress controller:
 ```bash
 $ oc -n openshift-ingress-operator patch ingresscontroller default --type='json' -p='[{"op": "replace", "path": "/spec/replicas", "value":0}]'
 ```

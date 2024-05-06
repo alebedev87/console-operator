@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	// k8s
@@ -34,7 +35,12 @@ import (
 	"github.com/openshift/console-operator/pkg/api"
 	"github.com/openshift/console-operator/pkg/console/controllers/util"
 	"github.com/openshift/console-operator/pkg/console/status"
+	serversub "github.com/openshift/console-operator/pkg/console/subresource/consoleserver"
 	routesub "github.com/openshift/console-operator/pkg/console/subresource/route"
+)
+
+const (
+	consoleConfigYamlFile = "console-config.yaml"
 )
 
 type HealthCheckController struct {
@@ -138,10 +144,9 @@ func (c *HealthCheckController) Sync(ctx context.Context, controllerContext fact
 		return statusHandler.FlushAndReturn(err)
 	}
 
-	// Disable the health check for external control plane topology (hypershift) if the ingress capability is disabled.
-	if util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig) {
-		return nil
-	}
+	// Use the console base address from the config as the ingress URI
+	// if the ingress capability is disabled on external controlplane topology (hypershift).
+	ingressDisabled := util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig)
 
 	activeRouteName := api.OpenShiftConsoleRouteName
 	routeConfig := routesub.NewRouteConfig(updatedOperatorConfig, ingressConfig, activeRouteName)
@@ -155,23 +160,35 @@ func (c *HealthCheckController) Sync(ctx context.Context, controllerContext fact
 		statusHandler.FlushAndReturn(activeRouteErr)
 	}
 
-	routeHealthCheckErrReason, routeHealthCheckErr := c.CheckRouteHealth(ctx, updatedOperatorConfig, activeRoute)
+	routeHealthCheckErrReason, routeHealthCheckErr := c.CheckRouteHealth(ctx, updatedOperatorConfig, activeRoute, ingressDisabled)
 	statusHandler.AddCondition(status.HandleDegraded("RouteHealth", routeHealthCheckErrReason, routeHealthCheckErr))
 	statusHandler.AddCondition(status.HandleAvailable("RouteHealth", routeHealthCheckErrReason, routeHealthCheckErr))
 
 	return statusHandler.FlushAndReturn(routeHealthCheckErr)
 }
 
-func (c *HealthCheckController) CheckRouteHealth(ctx context.Context, operatorConfig *operatorsv1.Console, route *routev1.Route) (string, error) {
+func (c *HealthCheckController) CheckRouteHealth(ctx context.Context, operatorConfig *operatorsv1.Console, route *routev1.Route, ingressDisabled bool) (string, error) {
 	var reason string
 	err := retry.OnError(
 		retry.DefaultRetry,
 		func(err error) bool { return err != nil },
 		func() error {
-			url, _, err := routeapihelpers.IngressURI(route, route.Spec.Host)
-			if err != nil {
-				reason = "RouteNotAdmitted"
-				return fmt.Errorf("console route is not admitted")
+			var (
+				url *url.URL
+				err error
+			)
+			if ingressDisabled {
+				url, err = c.getConsoleBaseAddress(ctx)
+				if err != nil {
+					reason = "FailedLoadBaseAddress"
+					return fmt.Errorf("failed to get console base address to check route health: %v", err)
+				}
+			} else {
+				url, _, err = routeapihelpers.IngressURI(route, route.Spec.Host)
+				if err != nil {
+					reason = "RouteNotAdmitted"
+					return fmt.Errorf("console route is not admitted")
+				}
 			}
 
 			caPool, err := c.getCA(ctx, route.Spec.TLS)
@@ -225,6 +242,29 @@ func (c *HealthCheckController) getCA(ctx context.Context, tls *routev1.TLSConfi
 	}
 
 	return caCertPool, nil
+}
+
+func (c *HealthCheckController) getConsoleBaseAddress(ctx context.Context) (*url.URL, error) {
+	cm, err := c.configMapClient.ConfigMaps(api.OpenShiftConsoleNamespace).Get(ctx, api.OpenShiftConsoleConfigMapName, metav1.GetOptions{})
+	if err != nil {
+		klog.V(4).Infof("failed to GET configmap %s / %s ", api.OpenShiftConsoleNamespace, api.OpenShiftConsoleConfigMapName)
+		return nil, err
+	}
+	cfgYAML, exists := cm.Data[consoleConfigYamlFile]
+	if !exists || len(cfgYAML) == 0 {
+		return nil, fmt.Errorf("failed to find console config data")
+	}
+	cfg, err := (&serversub.ConsoleYAMLParser{}).Parse([]byte(cfgYAML))
+	if err != nil {
+		klog.V(4).Info("failed to parse console configuration")
+		return nil, err
+	}
+	url, err := url.Parse(cfg.ClusterInfo.ConsoleBaseAddress)
+	if err != nil {
+		klog.V(4).Info("failed to parse console base address")
+		return nil, err
+	}
+	return url, nil
 }
 
 func clientWithCA(caPool *x509.CertPool) *http.Client {
