@@ -1,11 +1,14 @@
 package util
 
 import (
+	"context"
 	"testing"
 
 	"github.com/go-test/deep"
 	v1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 var (
@@ -140,4 +143,138 @@ func TestLabelFilter(t *testing.T) {
 		})
 	}
 
+}
+
+func TestGetConsoleBaseAddress(t *testing.T) {
+	tests := []struct {
+		name      string
+		configmap *corev1.ConfigMap
+		want      string
+		wantErr   bool
+	}{
+		{
+			name: "Test nominal",
+			configmap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "console-config",
+					Namespace: "openshift-console",
+				},
+				Data: map[string]string{
+					"console-config.yaml": `
+                        apiVersion: console.openshift.io/v1
+                        kind: ConsoleConfig
+                        clusterInfo:
+                          consoleBaseAddress: https://example.com
+                    `,
+				},
+			},
+			want: "https://example.com",
+		},
+		{
+			name: "Test empty address",
+			configmap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "console-config",
+					Namespace: "openshift-console",
+				},
+				Data: map[string]string{
+					"console-config.yaml": `
+                        apiVersion: console.openshift.io/v1
+                        kind: ConsoleConfig
+                        clusterInfo:
+                          consoleBaseAddress: ""
+                    `,
+				},
+			},
+			want: "",
+		},
+		{
+			name: "Test missing address",
+			configmap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "console-config",
+					Namespace: "openshift-console",
+				},
+				Data: map[string]string{
+					"console-config.yaml": `
+                        apiVersion: console.openshift.io/v1
+                        kind: ConsoleConfig
+                        clusterInfo:
+                    `,
+				},
+			},
+			want: "",
+		},
+		{
+			name: "Test wrong data key",
+			configmap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "console-config",
+					Namespace: "openshift-console",
+				},
+				Data: map[string]string{
+					"console-config": `
+                        apiVersion: console.openshift.io/v1
+                        kind: ConsoleConfig
+                        clusterInfo:
+                          consoleBaseAddress: https://example.com
+                    `,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Test invalid config",
+			configmap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "console-config",
+					Namespace: "openshift-console",
+				},
+				Data: map[string]string{
+					"console-config.yaml": `
+                        apiVersion: console.openshift.io/v1
+                        kind: ConsoleConfig
+                        clusterInfo
+                    `,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Test invalid url",
+			configmap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "console-config",
+					Namespace: "openshift-console",
+				},
+				Data: map[string]string{
+					"console-config.yaml": `
+                        apiVersion: console.openshift.io/v1
+                        kind: ConsoleConfig
+                        clusterInfo:
+                          consoleBaseAddress: ":::invalid-url:::"
+                    `,
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli := fake.NewSimpleClientset(tt.configmap)
+			got, err := GetConsoleBaseAddress(context.TODO(), cli.CoreV1())
+			if err != nil {
+				if !tt.wantErr {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			} else if tt.wantErr {
+				t.Fatal("error expected but not received")
+			}
+			if diff := deep.Equal(got.String(), tt.want); diff != nil {
+				t.Fatal(diff)
+			}
+		})
+	}
 }

@@ -1,6 +1,6 @@
 # Use AWS ALB as alternative ingress on ROSA HCP
 
-This doc aims at showing the minimum efforts needed to expose the OpenShift console via AWS ALB on a ROSA HCP cluster.
+This doc aims at showing the effort needed to expose the OpenShift console via AWS ALB on a ROSA HCP cluster.
 The use case in mind is [HyperShift hosted clusters where the Ingress capability is disabled](https://github.com/openshift/enhancements/pull/1415).
 
 ## Requirements
@@ -19,8 +19,8 @@ Note the certificate ARN, you will need it later.
 
 ### Create NodePort services for the console
 
-The AWS Load Balancer Controller routes the traffic between cluster instances.
-Therefore the service needs to be exposed via a port on the instance network:
+The AWS Load Balancer Controller routes the traffic between cluster nodes.
+Therefore the service needs to be exposed via a port on the node network:
 ```bash
 cat <<EOF | oc apply -f -
 apiVersion: v1
@@ -75,20 +75,14 @@ EOF
 
 ### Update console config
 
-The OpenShift console checks for the origin URI of the incoming requests. It has to match the console base address from the console configuration.
-Otherwise the following error is produced:
-
-> middleware.go:60] invalid source origin: invalid Origin or Referer: https://k8s-openshif-console-xxxxxxxxxx-xxxxxxxxx.us-east-2.elb.amazonaws.com expected `https://console-openshift-console.apps.mytestcluster.devcluster.openshift.com/
-
-Create the following configmap in `openshift-config-managed` namespace:
+Once ALB is provisioned you need to let the console operator know which host to use.
+Create the following configmap in `openshift-config-managed` namespace to set the console base address:
 ```bash
 $ CONSOLE_ALB_HOST=$(oc -n openshift-console get ing console -o yaml | yq .status.loadBalancer.ingress[0].hostname)
 $ cat <<EOF | oc apply -f -
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  labels:
-    app: console
   name: console-config
   namespace: openshift-config-managed
 data:
@@ -100,12 +94,6 @@ data:
 EOF
 ```
 
-### Update console OAuthClient
-
-The console uses a dedicated oauthclient to set the redirect link. We need to change it so that the authentication server redirects back to the provisioned ALB:
-```bash
-$ oc patch oauthclient console --type='json' -p="[{\"op\": \"replace\", \"path\": \"/redirectURIs/0\", \"value\":\"https://${CONSOLE_ALB_HOST}/auth/callback\"}]"
-```
 ## Notes
 
 1. ROSA HCP does not have the authentication operator, the authentication server is managed centrally by the HyperShift layer:
@@ -134,7 +122,7 @@ $ oc -n openshift-console rsh deploy/console curl -k https://openshift.default.s
 "token_endpoint": "https://oauth.mytestcluster.5199.s3.devshift.org:443/oauth/token",
 ```
 
-2. When the ingress capability is disabled, the console operator relies on the console base address for health checks instead of the route.
+2. When the ingress capability is disabled, the console operator relies on the console base address for health checks and oauthclient instead of the route.
 
 3. When the ingress capability is disabled, the console operator skips the implementation of the component route customization.
 
@@ -144,4 +132,4 @@ $ oc -n openshift-ingress-operator patch ingresscontroller default --type='json'
 ```
 
 ## Links
-- [Small demo of ALB ingress for the console on ROSA HCP](https://drive.google.com/file/d/1uWZgFbSeZTlDzlFyPW7QcH-625JsbSbw/view)
+- [Demo of ALB ingress for the console on ROSA HCP](https://drive.google.com/file/d/1uWZgFbSeZTlDzlFyPW7QcH-625JsbSbw/view)

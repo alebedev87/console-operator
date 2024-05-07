@@ -35,12 +35,7 @@ import (
 	"github.com/openshift/console-operator/pkg/api"
 	"github.com/openshift/console-operator/pkg/console/controllers/util"
 	"github.com/openshift/console-operator/pkg/console/status"
-	serversub "github.com/openshift/console-operator/pkg/console/subresource/consoleserver"
 	routesub "github.com/openshift/console-operator/pkg/console/subresource/route"
-)
-
-const (
-	consoleConfigYamlFile = "console-config.yaml"
 )
 
 type HealthCheckController struct {
@@ -178,10 +173,10 @@ func (c *HealthCheckController) CheckRouteHealth(ctx context.Context, operatorCo
 				err error
 			)
 			if ingressDisabled {
-				url, err = c.getConsoleBaseAddress(ctx)
+				url, err = util.GetConsoleBaseAddress(ctx, c.configMapClient)
 				if err != nil {
 					reason = "FailedLoadBaseAddress"
-					return fmt.Errorf("failed to get console base address to check route health: %v", err)
+					return fmt.Errorf("failed to get console base address: %w", err)
 				}
 			} else {
 				url, _, err = routeapihelpers.IngressURI(route, route.Spec.Host)
@@ -242,29 +237,6 @@ func (c *HealthCheckController) getCA(ctx context.Context, tls *routev1.TLSConfi
 	}
 
 	return caCertPool, nil
-}
-
-func (c *HealthCheckController) getConsoleBaseAddress(ctx context.Context) (*url.URL, error) {
-	cm, err := c.configMapClient.ConfigMaps(api.OpenShiftConsoleNamespace).Get(ctx, api.OpenShiftConsoleConfigMapName, metav1.GetOptions{})
-	if err != nil {
-		klog.V(4).Infof("failed to GET configmap %s / %s ", api.OpenShiftConsoleNamespace, api.OpenShiftConsoleConfigMapName)
-		return nil, err
-	}
-	cfgYAML, exists := cm.Data[consoleConfigYamlFile]
-	if !exists || len(cfgYAML) == 0 {
-		return nil, fmt.Errorf("failed to find console config data")
-	}
-	cfg, err := (&serversub.ConsoleYAMLParser{}).Parse([]byte(cfgYAML))
-	if err != nil {
-		klog.V(4).Info("failed to parse console configuration")
-		return nil, err
-	}
-	url, err := url.Parse(cfg.ClusterInfo.ConsoleBaseAddress)
-	if err != nil {
-		klog.V(4).Info("failed to parse console base address")
-		return nil, err
-	}
-	return url, nil
 }
 
 func clientWithCA(caPool *x509.CertPool) *http.Client {

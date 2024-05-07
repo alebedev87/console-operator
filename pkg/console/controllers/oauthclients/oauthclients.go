@@ -3,12 +3,14 @@ package oauthclients
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1informers "k8s.io/client-go/informers/core/v1"
+	coreclientv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -47,10 +49,13 @@ import (
 //		- type=OAuthClientSyncProgressing
 //		- type=OAuthClientSyncDegraded
 type oauthClientsController struct {
+	// clients
 	oauthClient          oauthv1client.OAuthClientsGetter
 	operatorClient       v1helpers.OperatorClient
 	infrastructureClient configclientv1.InfrastructureInterface
+	configMapClient      coreclientv1.ConfigMapsGetter
 
+	// listers
 	oauthClientLister           oauthv1lister.OAuthClientLister
 	oauthClientSwitchedInformer *util.InformerWithSwitch
 	authnLister                 configv1lister.AuthenticationLister
@@ -65,6 +70,7 @@ func NewOAuthClientsController(
 	operatorClient v1helpers.OperatorClient,
 	oauthClient oauthclient.Interface,
 	configClient configclientv1.ConfigV1Interface,
+	configMapClient coreclientv1.ConfigMapsGetter,
 	configInformer configinformer.SharedInformerFactory,
 	authnInformer configv1informers.AuthenticationInformer,
 	consoleOperatorInformer operatorv1informers.ConsoleInformer,
@@ -78,6 +84,7 @@ func NewOAuthClientsController(
 		oauthClient:          oauthClient.OauthV1(),
 		operatorClient:       operatorClient,
 		infrastructureClient: configClient.Infrastructures(),
+		configMapClient:      configMapClient,
 
 		oauthClientLister:           oauthClientSwitchedInformer.Lister(),
 		oauthClientSwitchedInformer: oauthClientSwitchedInformer,
@@ -128,11 +135,9 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 		return statusHandler.FlushAndReturn(err)
 	}
 
-	// Disable the oauth client update for external control plane topology (hypershift) if the ingress capability is disabled.
-	// HyperShift handles the updating of the oauth client for the console.
-	if util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig) {
-		return statusHandler.FlushAndReturn(nil)
-	}
+	// Use the console base address from the config as the console URL
+	// if the ingress capability is disabled on external controlplane topology (hypershift).
+	ingressDisabled := util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig)
 
 	authnConfig, err := c.authnLister.Get(api.ConfigResourceName)
 	if err != nil {
@@ -157,15 +162,26 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 		return err
 	}
 
-	routeName := api.OpenShiftConsoleRouteName
-	routeConfig := routesub.NewRouteConfig(operatorConfig, ingressConfig, routeName)
-	if routeConfig.IsCustomHostnameSet() {
-		routeName = api.OpenshiftConsoleCustomRouteName
-	}
+	var consoleURL *url.URL
 
-	_, consoleURL, _, routeErr := routesub.GetActiveRouteInfo(c.routesLister, routeName)
-	if routeErr != nil {
-		return routeErr
+	if !ingressDisabled {
+		routeName := api.OpenShiftConsoleRouteName
+		routeConfig := routesub.NewRouteConfig(operatorConfig, ingressConfig, routeName)
+		if routeConfig.IsCustomHostnameSet() {
+			routeName = api.OpenshiftConsoleCustomRouteName
+		}
+
+		_, url, _, routeErr := routesub.GetActiveRouteInfo(c.routesLister, routeName)
+		if routeErr != nil {
+			return routeErr
+		}
+		consoleURL = url
+	} else {
+		url, err := util.GetConsoleBaseAddress(ctx, c.configMapClient)
+		if err != nil {
+			return fmt.Errorf("failed to get console base address: %w", err)
+		}
+		consoleURL = url
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

@@ -3,10 +3,12 @@ package util
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	// k8s
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	coreclientv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
@@ -17,6 +19,13 @@ import (
 	// github
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/v1helpers"
+
+	"github.com/openshift/console-operator/pkg/api"
+	serversub "github.com/openshift/console-operator/pkg/console/subresource/consoleserver"
+)
+
+const (
+	consoleConfigYamlFile = "console-config.yaml"
 )
 
 // Return func which returns true if obj name is in names
@@ -100,4 +109,25 @@ func IsExternalControlPlaneWithIngressDisabled(infrastructureConfig *configv1.In
 	}
 
 	return infrastructureConfig.Status.ControlPlaneTopology == configv1.ExternalTopologyMode && !isIngressCapabilityEnabled
+}
+
+// GetConsoleBaseAddress returns the console base address from console configuration configmap.
+func GetConsoleBaseAddress(ctx context.Context, configMapClient coreclientv1.ConfigMapsGetter) (*url.URL, error) {
+	cm, err := configMapClient.ConfigMaps(api.OpenShiftConsoleNamespace).Get(ctx, api.OpenShiftConsoleConfigMapName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get configmap %s/%s: %w", api.OpenShiftConsoleNamespace, api.OpenShiftConsoleConfigMapName, err)
+	}
+	cfgYAML, exists := cm.Data[consoleConfigYamlFile]
+	if !exists || len(cfgYAML) == 0 {
+		return nil, fmt.Errorf("failed to find console config data")
+	}
+	cfg, err := (&serversub.ConsoleYAMLParser{}).Parse([]byte(cfgYAML))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse console configuration: %w", err)
+	}
+	url, err := url.Parse(cfg.ClusterInfo.ConsoleBaseAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse console base address: %w", err)
+	}
+	return url, nil
 }
