@@ -173,7 +173,7 @@ func (c *HealthCheckController) CheckRouteHealth(ctx context.Context, operatorCo
 				err error
 			)
 			if ingressDisabled {
-				url, err = util.GetConsoleBaseAddress(ctx, c.configMapClient)
+				url, err = util.GetConsoleBaseAddress(ctx, c.configMapLister)
 				if err != nil {
 					reason = "FailedLoadBaseAddress"
 					return fmt.Errorf("failed to get console base address: %w", err)

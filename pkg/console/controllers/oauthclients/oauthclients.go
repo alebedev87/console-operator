@@ -50,10 +50,9 @@ import (
 //		- type=OAuthClientSyncDegraded
 type oauthClientsController struct {
 	// clients
-	oauthClient          oauthv1client.OAuthClientsGetter
-	operatorClient       v1helpers.OperatorClient
-	infrastructureClient configclientv1.InfrastructureInterface
-	configMapClient      coreclientv1.ConfigMapsGetter
+	oauthClient     oauthv1client.OAuthClientsGetter
+	operatorClient  v1helpers.OperatorClient
+	configMapClient coreclientv1.ConfigMapsGetter
 
 	// listers
 	oauthClientLister           oauthv1lister.OAuthClientLister
@@ -63,7 +62,9 @@ type oauthClientsController struct {
 	routesLister                routev1listers.RouteLister
 	ingressConfigLister         configv1lister.IngressLister
 	targetNSSecretsLister       corev1listers.SecretLister
+	infrastructureLister        configv1lister.InfrastructureLister
 	clusterVersionLister        configv1lister.ClusterVersionLister
+	configMapLister             corev1listers.ConfigMapLister
 }
 
 func NewOAuthClientsController(
@@ -77,14 +78,13 @@ func NewOAuthClientsController(
 	routeInformer routev1informers.RouteInformer,
 	ingressConfigInformer configv1informers.IngressInformer,
 	targetNSsecretsInformer corev1informers.SecretInformer,
+	configMapsInformer corev1informers.ConfigMapInformer,
 	oauthClientSwitchedInformer *util.InformerWithSwitch,
 	recorder events.Recorder,
 ) factory.Controller {
 	c := oauthClientsController{
-		oauthClient:          oauthClient.OauthV1(),
-		operatorClient:       operatorClient,
-		infrastructureClient: configClient.Infrastructures(),
-		configMapClient:      configMapClient,
+		oauthClient:    oauthClient.OauthV1(),
+		operatorClient: operatorClient,
 
 		oauthClientLister:           oauthClientSwitchedInformer.Lister(),
 		oauthClientSwitchedInformer: oauthClientSwitchedInformer,
@@ -93,6 +93,8 @@ func NewOAuthClientsController(
 		routesLister:                routeInformer.Lister(),
 		ingressConfigLister:         ingressConfigInformer.Lister(),
 		targetNSSecretsLister:       targetNSsecretsInformer.Lister(),
+		configMapLister:             configMapsInformer.Lister(),
+		infrastructureLister:        configInformer.Config().V1().Infrastructures().Lister(),
 		clusterVersionLister:        configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
@@ -123,7 +125,7 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
 
-	infrastructureConfig, err := c.infrastructureClient.Get(ctx, api.ConfigResourceName, metav1.GetOptions{})
+	infrastructureConfig, err := c.infrastructureLister.Get(api.ConfigResourceName)
 	if err != nil {
 		klog.Errorf("infrastructure config error: %v", err)
 		return statusHandler.FlushAndReturn(err)
@@ -177,7 +179,7 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 		}
 		consoleURL = url
 	} else {
-		url, err := util.GetConsoleBaseAddress(ctx, c.configMapClient)
+		url, err := util.GetConsoleBaseAddress(ctx, c.configMapLister)
 		if err != nil {
 			return fmt.Errorf("failed to get console base address: %w", err)
 		}

@@ -3,11 +3,14 @@ package util
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/go-test/deep"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -262,8 +265,19 @@ func TestGetConsoleBaseAddress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.TODO())
+			defer cancel()
+
 			cli := fake.NewSimpleClientset(tt.configmap)
-			got, err := GetConsoleBaseAddress(context.TODO(), cli.CoreV1())
+			informer := informers.NewSharedInformerFactory(cli, 0).Core().V1().ConfigMaps()
+			go informer.Informer().Run(ctx.Done())
+			if err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 1*time.Second, true, func(ctx context.Context) (done bool, err error) {
+				return informer.Informer().HasSynced(), nil
+			}); err != nil {
+				t.Fatalf("timed out waiting for informer to be synced: %v", err)
+			}
+
+			got, err := GetConsoleBaseAddress(context.TODO(), informer.Lister())
 			if err != nil {
 				if !tt.wantErr {
 					t.Fatalf("unexpected error: %v", err)

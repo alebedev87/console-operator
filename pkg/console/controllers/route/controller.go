@@ -40,13 +40,13 @@ type RouteSyncController struct {
 	routeName            string
 	isHealthCheckEnabled bool
 	// clients
-	operatorClient       v1helpers.OperatorClient
-	routeClient          routeclientv1.RoutesGetter
-	infrastructureClient configclientv1.InfrastructureInterface
+	operatorClient v1helpers.OperatorClient
+	routeClient    routeclientv1.RoutesGetter
 	// listers
 	operatorConfigLister operatorv1listers.ConsoleLister
 	ingressConfigLister  configlistersv1.IngressLister
 	secretLister         corev1listers.SecretLister
+	infrastructureLister configlistersv1.InfrastructureLister
 	clusterVersionLister configlistersv1.ClusterVersionLister
 }
 
@@ -69,13 +69,13 @@ func NewRouteSyncController(
 		routeName:            routeName,
 		isHealthCheckEnabled: isHealthCheckEnabled,
 		// clients
-		operatorClient:       operatorClient,
-		routeClient:          routev1Client,
-		infrastructureClient: configClient.Infrastructures(),
+		operatorClient: operatorClient,
+		routeClient:    routev1Client,
 		// listers
 		operatorConfigLister: operatorConfigInformer.Lister(),
 		ingressConfigLister:  configInformer.Config().V1().Ingresses().Lister(),
 		secretLister:         secretInformer.Lister(),
+		infrastructureLister: configInformer.Config().V1().Infrastructures().Lister(),
 		clusterVersionLister: configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
@@ -121,7 +121,7 @@ func (c *RouteSyncController) Sync(ctx context.Context, controllerContext factor
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
 
-	infrastructureConfig, err := c.infrastructureClient.Get(ctx, api.ConfigResourceName, metav1.GetOptions{})
+	infrastructureConfig, err := c.infrastructureLister.Get(api.ConfigResourceName)
 	if err != nil {
 		klog.Errorf("infrastructure config error: %v", err)
 		return statusHandler.FlushAndReturn(err)

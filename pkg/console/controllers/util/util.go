@@ -8,7 +8,7 @@ import (
 	// k8s
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	coreclientv1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
@@ -112,8 +112,8 @@ func IsExternalControlPlaneWithIngressDisabled(infrastructureConfig *configv1.In
 }
 
 // GetConsoleBaseAddress returns the console base address from console configuration configmap.
-func GetConsoleBaseAddress(ctx context.Context, configMapClient coreclientv1.ConfigMapsGetter) (*url.URL, error) {
-	cm, err := configMapClient.ConfigMaps(api.OpenShiftConsoleNamespace).Get(ctx, api.OpenShiftConsoleConfigMapName, metav1.GetOptions{})
+func GetConsoleBaseAddress(ctx context.Context, configMapLister corev1listers.ConfigMapLister) (*url.URL, error) {
+	cm, err := configMapLister.ConfigMaps(api.OpenShiftConsoleNamespace).Get(api.OpenShiftConsoleConfigMapName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get configmap %s/%s: %w", api.OpenShiftConsoleNamespace, api.OpenShiftConsoleConfigMapName, err)
 	}
