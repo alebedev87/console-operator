@@ -62,7 +62,7 @@ type oauthClientsController struct {
 	routesLister                routev1listers.RouteLister
 	ingressConfigLister         configv1lister.IngressLister
 	targetNSSecretsLister       corev1listers.SecretLister
-	infrastructureLister        configv1lister.InfrastructureLister
+	infrastructureConfigLister  configv1lister.InfrastructureLister
 	clusterVersionLister        configv1lister.ClusterVersionLister
 	configMapLister             corev1listers.ConfigMapLister
 }
@@ -94,7 +94,7 @@ func NewOAuthClientsController(
 		ingressConfigLister:         ingressConfigInformer.Lister(),
 		targetNSSecretsLister:       targetNSsecretsInformer.Lister(),
 		configMapLister:             configMapsInformer.Lister(),
-		infrastructureLister:        configInformer.Config().V1().Infrastructures().Lister(),
+		infrastructureConfigLister:  configInformer.Config().V1().Infrastructures().Lister(),
 		clusterVersionLister:        configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
@@ -125,7 +125,7 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
 
-	infrastructureConfig, err := c.infrastructureLister.Get(api.ConfigResourceName)
+	infrastructureConfig, err := c.infrastructureConfigLister.Get(api.ConfigResourceName)
 	if err != nil {
 		klog.Errorf("infrastructure config error: %v", err)
 		return statusHandler.FlushAndReturn(err)

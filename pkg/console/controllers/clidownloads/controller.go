@@ -47,13 +47,13 @@ import (
 type CLIDownloadsSyncController struct {
 	// clients
 	operatorClient            v1helpers.OperatorClient
-	infrastructureClient      configclientv1.InfrastructureInterface
 	consoleCliDownloadsClient consoleclientv1.ConsoleCLIDownloadInterface
 	// listers
-	routeLister          routev1listers.RouteLister
-	ingressConfigLister  configlistersv1.IngressLister
-	operatorConfigLister operatorv1listers.ConsoleLister
-	clusterVersionLister configlistersv1.ClusterVersionLister
+	routeLister                routev1listers.RouteLister
+	ingressConfigLister        configlistersv1.IngressLister
+	operatorConfigLister       operatorv1listers.ConsoleLister
+	infrastructureConfigLister configlistersv1.InfrastructureLister
+	clusterVersionLister       configlistersv1.ClusterVersionLister
 }
 
 func NewCLIDownloadsSyncController(
@@ -74,13 +74,13 @@ func NewCLIDownloadsSyncController(
 	ctrl := &CLIDownloadsSyncController{
 		// clients
 		operatorClient:            operatorClient,
-		infrastructureClient:      configClient.Infrastructures(),
 		consoleCliDownloadsClient: cliDownloadsInterface,
 		// listers
-		routeLister:          routeInformer.Lister(),
-		ingressConfigLister:  configInformer.Config().V1().Ingresses().Lister(),
-		operatorConfigLister: operatorConfigInformer.Lister(),
-		clusterVersionLister: configInformer.Config().V1().ClusterVersions().Lister(),
+		routeLister:                routeInformer.Lister(),
+		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
+		operatorConfigLister:       operatorConfigInformer.Lister(),
+		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
+		clusterVersionLister:       configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
 	configV1Informers := configInformer.Config().V1()
@@ -121,7 +121,7 @@ func (c *CLIDownloadsSyncController) Sync(ctx context.Context, controllerContext
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
 
-	infrastructureConfig, err := c.infrastructureClient.Get(ctx, api.ConfigResourceName, metav1.GetOptions{})
+	infrastructureConfig, err := c.infrastructureConfigLister.Get(api.ConfigResourceName)
 	if err != nil {
 		klog.Errorf("infrastructure config error: %v", err)
 		return statusHandler.FlushAndReturn(err)

@@ -12,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+
+	configv1 "github.com/openshift/api/config/v1"
 )
 
 var (
@@ -148,7 +150,94 @@ func TestLabelFilter(t *testing.T) {
 
 }
 
+func TestIsExternalControlPlaneWithIngressDisabled(t *testing.T) {
+	type args struct {
+		infraConfig    *configv1.Infrastructure
+		clusterVersion *configv1.ClusterVersion
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "Test ingress capability disabled",
+			args: args{
+				infraConfig: &configv1.Infrastructure{
+					Status: configv1.InfrastructureStatus{
+						ControlPlaneTopology: configv1.ExternalTopologyMode,
+					},
+				},
+				clusterVersion: &configv1.ClusterVersion{
+					Status: configv1.ClusterVersionStatus{
+						Capabilities: configv1.ClusterVersionCapabilitiesStatus{
+							EnabledCapabilities: []configv1.ClusterVersionCapability{
+								configv1.ClusterVersionCapabilityOpenShiftSamples,
+							},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Test ingress capability enabled",
+			args: args{
+				infraConfig: &configv1.Infrastructure{
+					Status: configv1.InfrastructureStatus{
+						ControlPlaneTopology: configv1.ExternalTopologyMode,
+					},
+				},
+				clusterVersion: &configv1.ClusterVersion{
+					Status: configv1.ClusterVersionStatus{
+						Capabilities: configv1.ClusterVersionCapabilitiesStatus{
+							EnabledCapabilities: []configv1.ClusterVersionCapability{
+								configv1.ClusterVersionCapabilityOpenShiftSamples,
+								configv1.ClusterVersionCapabilityIngress,
+							},
+						},
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "Test control plane topology is not external",
+			args: args{
+				infraConfig: &configv1.Infrastructure{
+					Status: configv1.InfrastructureStatus{
+						ControlPlaneTopology: configv1.HighlyAvailableTopologyMode,
+					},
+				},
+				clusterVersion: &configv1.ClusterVersion{
+					Status: configv1.ClusterVersionStatus{
+						Capabilities: configv1.ClusterVersionCapabilitiesStatus{
+							EnabledCapabilities: []configv1.ClusterVersionCapability{
+								configv1.ClusterVersionCapabilityOpenShiftSamples,
+							},
+						},
+					},
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if diff := deep.Equal(IsExternalControlPlaneWithIngressDisabled(tt.args.infraConfig, tt.args.clusterVersion), tt.want); diff != nil {
+				t.Error(diff)
+			}
+		})
+	}
+}
+
 func TestGetConsoleBaseAddress(t *testing.T) {
+	const (
+		informerSyncInterval = 100 * time.Millisecond
+		informerSyncTimeout  = 1 * time.Second
+	)
+
 	tests := []struct {
 		name      string
 		configmap *corev1.ConfigMap
@@ -271,13 +360,13 @@ func TestGetConsoleBaseAddress(t *testing.T) {
 			cli := fake.NewSimpleClientset(tt.configmap)
 			informer := informers.NewSharedInformerFactory(cli, 0).Core().V1().ConfigMaps()
 			go informer.Informer().Run(ctx.Done())
-			if err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 1*time.Second, true, func(ctx context.Context) (done bool, err error) {
+			if err := wait.PollUntilContextTimeout(ctx, informerSyncInterval, informerSyncTimeout, true, func(ctx context.Context) (done bool, err error) {
 				return informer.Informer().HasSynced(), nil
 			}); err != nil {
 				t.Fatalf("timed out waiting for informer to be synced: %v", err)
 			}
 
-			got, err := GetConsoleBaseAddress(context.TODO(), informer.Lister())
+			got, err := GetConsoleBaseAddress(ctx, informer.Lister())
 			if err != nil {
 				if !tt.wantErr {
 					t.Fatalf("unexpected error: %v", err)

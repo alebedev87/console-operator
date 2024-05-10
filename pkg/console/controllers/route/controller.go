@@ -43,11 +43,11 @@ type RouteSyncController struct {
 	operatorClient v1helpers.OperatorClient
 	routeClient    routeclientv1.RoutesGetter
 	// listers
-	operatorConfigLister operatorv1listers.ConsoleLister
-	ingressConfigLister  configlistersv1.IngressLister
-	secretLister         corev1listers.SecretLister
-	infrastructureLister configlistersv1.InfrastructureLister
-	clusterVersionLister configlistersv1.ClusterVersionLister
+	operatorConfigLister       operatorv1listers.ConsoleLister
+	ingressConfigLister        configlistersv1.IngressLister
+	secretLister               corev1listers.SecretLister
+	infrastructureConfigLister configlistersv1.InfrastructureLister
+	clusterVersionLister       configlistersv1.ClusterVersionLister
 }
 
 func NewRouteSyncController(
@@ -72,11 +72,11 @@ func NewRouteSyncController(
 		operatorClient: operatorClient,
 		routeClient:    routev1Client,
 		// listers
-		operatorConfigLister: operatorConfigInformer.Lister(),
-		ingressConfigLister:  configInformer.Config().V1().Ingresses().Lister(),
-		secretLister:         secretInformer.Lister(),
-		infrastructureLister: configInformer.Config().V1().Infrastructures().Lister(),
-		clusterVersionLister: configInformer.Config().V1().ClusterVersions().Lister(),
+		operatorConfigLister:       operatorConfigInformer.Lister(),
+		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
+		secretLister:               secretInformer.Lister(),
+		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
+		clusterVersionLister:       configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
 	configV1Informers := configInformer.Config().V1()
@@ -121,7 +121,7 @@ func (c *RouteSyncController) Sync(ctx context.Context, controllerContext factor
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
 
-	infrastructureConfig, err := c.infrastructureLister.Get(api.ConfigResourceName)
+	infrastructureConfig, err := c.infrastructureConfigLister.Get(api.ConfigResourceName)
 	if err != nil {
 		klog.Errorf("infrastructure config error: %v", err)
 		return statusHandler.FlushAndReturn(err)
