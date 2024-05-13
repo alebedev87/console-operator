@@ -9,6 +9,11 @@ import (
 // +genclient
 // +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:path=consoles,scope=Cluster
+// +kubebuilder:subresource:status
+// +openshift:api-approved.openshift.io=https://github.com/openshift/api/pull/486
+// +openshift:file-pattern=cvoRunLevel=0000_50,operatorName=console,operatorOrdering=01
 
 // Console provides a means to configure an operator to manage the console.
 //
@@ -52,6 +57,11 @@ type ConsoleSpec struct {
 	// plugins defines a list of enabled console plugin names.
 	// +optional
 	Plugins []string `json:"plugins,omitempty"`
+	// ingress allows to configure the alternative ingress for the console.
+	// This field is intended for clusters without ingress capability,
+	// where access to routes is not possible.
+	// +optional
+	Ingress Ingress `json:"ingress,omitempty"`
 }
 
 // ConsoleConfigRoute holds information on external route access to console.
@@ -369,6 +379,28 @@ const (
 	// Branding for Red Hat OpenShift Service on AWS
 	BrandROSA Brand = "ROSA"
 )
+
+// Ingress allows cluster admin to configure alternative ingress for the console.
+type Ingress struct {
+	// consoleURL is a URL to be used as the base console address.
+	// This field is intended for clusters without ingress capability,
+	// where access to routes is not possible.
+	// Must use the HTTPS scheme.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="isURL(self)",message="console url must be a valid absolute URL"
+	// +kubebuilder:validation:XValidation:rule="url(self).getScheme() == 'https'",message="console url scheme must be https"
+	// +kubebuilder:validation:MaxLength=1024
+	ConsoleURL string `json:"consoleURL,omitempty"`
+	// clientDownloadsURL is a URL to be used as the address to download client binaries.
+	// This field is intended for clusters without ingress capability,
+	// where access to routes is not possible.
+	// Must use the HTTPS scheme.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="isURL(self)",message="client downloads url must be a valid absolute URL"
+	// +kubebuilder:validation:XValidation:rule="url(self).getScheme() == 'https'",message="client downloads url scheme must be https"
+	// +kubebuilder:validation:MaxLength=1024
+	ClientDownloadsURL string `json:"clientDownloadsURL,omitempty"`
+}
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
