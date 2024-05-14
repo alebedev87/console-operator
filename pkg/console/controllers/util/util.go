@@ -8,7 +8,6 @@ import (
 	// k8s
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
@@ -19,13 +18,6 @@ import (
 	// github
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/v1helpers"
-
-	"github.com/openshift/console-operator/pkg/api"
-	serversub "github.com/openshift/console-operator/pkg/console/subresource/consoleserver"
-)
-
-const (
-	consoleConfigYamlFile = "console-config.yaml"
 )
 
 // Return func which returns true if obj name is in names
@@ -111,23 +103,26 @@ func IsExternalControlPlaneWithIngressDisabled(infrastructureConfig *configv1.In
 	return infrastructureConfig.Status.ControlPlaneTopology == configv1.ExternalTopologyMode && !isIngressCapabilityEnabled
 }
 
-// GetConsoleBaseAddress returns the console base address from console configuration configmap.
-func GetConsoleBaseAddress(ctx context.Context, configMapLister corev1listers.ConfigMapLister) (*url.URL, error) {
-	cm, err := configMapLister.ConfigMaps(api.OpenShiftConsoleNamespace).Get(api.OpenShiftConsoleConfigMapName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get configmap %s/%s: %w", api.OpenShiftConsoleNamespace, api.OpenShiftConsoleConfigMapName, err)
+// GetConsoleURLFromConfig returns the custom console url from operator configuration.
+func GetConsoleURLFromConfig(operatorConfig *operatorv1.Console) (*url.URL, error) {
+	if len(operatorConfig.Spec.Ingress.ConsoleURL) == 0 {
+		return nil, fmt.Errorf("console url not found")
 	}
-	cfgYAML, exists := cm.Data[consoleConfigYamlFile]
-	if !exists || len(cfgYAML) == 0 {
-		return nil, fmt.Errorf("failed to find console config data")
-	}
-	cfg, err := (&serversub.ConsoleYAMLParser{}).Parse([]byte(cfgYAML))
+	url, err := url.Parse(operatorConfig.Spec.Ingress.ConsoleURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse console configuration: %w", err)
+		return nil, err
 	}
-	url, err := url.Parse(cfg.ClusterInfo.ConsoleBaseAddress)
+	return url, nil
+}
+
+// GetDownloadsURLFromConfig returns the custom downloads url from operator configuration.
+func GetDownloadsURLFromConfig(operatorConfig *operatorv1.Console) (*url.URL, error) {
+	if len(operatorConfig.Spec.Ingress.ClientDownloadsURL) == 0 {
+		return nil, fmt.Errorf("downloads url not found")
+	}
+	url, err := url.Parse(operatorConfig.Spec.Ingress.ClientDownloadsURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse console base address: %w", err)
+		return nil, err
 	}
 	return url, nil
 }

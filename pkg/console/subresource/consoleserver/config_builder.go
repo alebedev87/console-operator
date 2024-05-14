@@ -46,6 +46,7 @@ type ConsoleServerCLIConfigBuilder struct {
 	brand                      operatorv1.Brand
 	docURL                     string
 	apiServerURL               string
+	consoleURL                 string
 	controlPlaneToplogy        configv1.TopologyMode
 	statusPageID               string
 	customProductName          string
@@ -94,6 +95,10 @@ func (b *ConsoleServerCLIConfigBuilder) DocURL(docURL string) *ConsoleServerCLIC
 }
 func (b *ConsoleServerCLIConfigBuilder) APIServerURL(apiServerURL string) *ConsoleServerCLIConfigBuilder {
 	b.apiServerURL = apiServerURL
+	return b
+}
+func (b *ConsoleServerCLIConfigBuilder) ConsoleURL(consoleURL string) *ConsoleServerCLIConfigBuilder {
+	b.consoleURL = consoleURL
 	return b
 }
 func (b *ConsoleServerCLIConfigBuilder) TopologyMode(topologyMode configv1.TopologyMode) *ConsoleServerCLIConfigBuilder {
@@ -379,6 +384,9 @@ func (b *ConsoleServerCLIConfigBuilder) customization() Customization {
 	}
 	if len(b.customLogoFile) > 0 {
 		conf.CustomLogoFile = b.customLogoFile
+	}
+	if len(b.consoleURL) > 0 {
+		conf.ConsoleURL = b.consoleURL
 	}
 
 	if b.devCatalogCustomization.Categories != nil {

@@ -113,6 +113,8 @@ type Customization struct {
 	AddPage AddPage `yaml:"addPage,omitempty"`
 	// perspectives allows enabling/disabling of perspective(s) that user can see in the Perspective switcher dropdown.
 	Perspectives []Perspective `yaml:"perspectives,omitempty"`
+	// consoleURL allows customizing console base address.
+	ConsoleURL string `yaml:"consoleURL,omitempty"`
 }
 
 // QuickStarts contains options for quick starts

@@ -1,19 +1,14 @@
 package util
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/go-test/deep"
 	v1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes/fake"
 
 	configv1 "github.com/openshift/api/config/v1"
+	operatorv1 "github.com/openshift/api/operator/v1"
 )
 
 var (
@@ -232,120 +227,60 @@ func TestIsExternalControlPlaneWithIngressDisabled(t *testing.T) {
 	}
 }
 
-func TestGetConsoleBaseAddress(t *testing.T) {
-	const (
-		informerSyncInterval = 100 * time.Millisecond
-		informerSyncTimeout  = 1 * time.Second
-	)
-
+func TestGetConsoleURLFromConfig(t *testing.T) {
+	type args struct {
+		config *operatorv1.Console
+	}
 	tests := []struct {
-		name      string
-		configmap *corev1.ConfigMap
-		want      string
-		wantErr   bool
+		name    string
+		args    args
+		want    string
+		wantErr bool
 	}{
 		{
 			name: "Test nominal",
-			configmap: &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "console-config",
-					Namespace: "openshift-console",
-				},
-				Data: map[string]string{
-					"console-config.yaml": `
-                        apiVersion: console.openshift.io/v1
-                        kind: ConsoleConfig
-                        clusterInfo:
-                          consoleBaseAddress: https://example.com
-                    `,
+			args: args{
+				config: &operatorv1.Console{
+					Spec: operatorv1.ConsoleSpec{
+						Ingress: operatorv1.Ingress{
+							ConsoleURL: "https://example.com",
+						},
+					},
 				},
 			},
 			want: "https://example.com",
 		},
 		{
-			name: "Test empty address",
-			configmap: &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "console-config",
-					Namespace: "openshift-console",
-				},
-				Data: map[string]string{
-					"console-config.yaml": `
-                        apiVersion: console.openshift.io/v1
-                        kind: ConsoleConfig
-                        clusterInfo:
-                          consoleBaseAddress: ""
-                    `,
+			name: "Test nominal",
+			args: args{
+				config: &operatorv1.Console{
+					Spec: operatorv1.ConsoleSpec{
+						Ingress: operatorv1.Ingress{
+							ConsoleURL: "https://example.com",
+						},
+					},
 				},
 			},
-			want: "",
+			want: "https://example.com",
 		},
 		{
-			name: "Test missing address",
-			configmap: &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "console-config",
-					Namespace: "openshift-console",
-				},
-				Data: map[string]string{
-					"console-config.yaml": `
-                        apiVersion: console.openshift.io/v1
-                        kind: ConsoleConfig
-                        clusterInfo:
-                    `,
-				},
-			},
-			want: "",
-		},
-		{
-			name: "Test wrong data key",
-			configmap: &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "console-config",
-					Namespace: "openshift-console",
-				},
-				Data: map[string]string{
-					"console-config": `
-                        apiVersion: console.openshift.io/v1
-                        kind: ConsoleConfig
-                        clusterInfo:
-                          consoleBaseAddress: https://example.com
-                    `,
+			name: "Test empty",
+			args: args{
+				config: &operatorv1.Console{
+					Spec: operatorv1.ConsoleSpec{},
 				},
 			},
 			wantErr: true,
 		},
 		{
-			name: "Test invalid config",
-			configmap: &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "console-config",
-					Namespace: "openshift-console",
-				},
-				Data: map[string]string{
-					"console-config.yaml": `
-                        apiVersion: console.openshift.io/v1
-                        kind: ConsoleConfig
-                        clusterInfo
-                    `,
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "Test invalid url",
-			configmap: &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "console-config",
-					Namespace: "openshift-console",
-				},
-				Data: map[string]string{
-					"console-config.yaml": `
-                        apiVersion: console.openshift.io/v1
-                        kind: ConsoleConfig
-                        clusterInfo:
-                          consoleBaseAddress: ":::invalid-url:::"
-                    `,
+			name: "Test invalid",
+			args: args{
+				config: &operatorv1.Console{
+					Spec: operatorv1.ConsoleSpec{
+						Ingress: operatorv1.Ingress{
+							ConsoleURL: ":::invalid-url:::",
+						},
+					},
 				},
 			},
 			wantErr: true,
@@ -354,19 +289,7 @@ func TestGetConsoleBaseAddress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.TODO())
-			defer cancel()
-
-			cli := fake.NewSimpleClientset(tt.configmap)
-			informer := informers.NewSharedInformerFactory(cli, 0).Core().V1().ConfigMaps()
-			go informer.Informer().Run(ctx.Done())
-			if err := wait.PollUntilContextTimeout(ctx, informerSyncInterval, informerSyncTimeout, true, func(ctx context.Context) (done bool, err error) {
-				return informer.Informer().HasSynced(), nil
-			}); err != nil {
-				t.Fatalf("timed out waiting for informer to be synced: %v", err)
-			}
-
-			got, err := GetConsoleBaseAddress(ctx, informer.Lister())
+			got, err := GetConsoleURLFromConfig(tt.args.config)
 			if err != nil {
 				if !tt.wantErr {
 					t.Fatalf("unexpected error: %v", err)
