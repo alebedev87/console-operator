@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1informers "k8s.io/client-go/informers/core/v1"
-	coreclientv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -50,9 +49,8 @@ import (
 //		- type=OAuthClientSyncDegraded
 type oauthClientsController struct {
 	// clients
-	oauthClient     oauthv1client.OAuthClientsGetter
-	operatorClient  v1helpers.OperatorClient
-	configMapClient coreclientv1.ConfigMapsGetter
+	oauthClient    oauthv1client.OAuthClientsGetter
+	operatorClient v1helpers.OperatorClient
 
 	// listers
 	oauthClientLister           oauthv1lister.OAuthClientLister
@@ -64,21 +62,18 @@ type oauthClientsController struct {
 	targetNSSecretsLister       corev1listers.SecretLister
 	infrastructureConfigLister  configv1lister.InfrastructureLister
 	clusterVersionLister        configv1lister.ClusterVersionLister
-	configMapLister             corev1listers.ConfigMapLister
 }
 
 func NewOAuthClientsController(
 	operatorClient v1helpers.OperatorClient,
 	oauthClient oauthclient.Interface,
 	configClient configclientv1.ConfigV1Interface,
-	configMapClient coreclientv1.ConfigMapsGetter,
 	configInformer configinformer.SharedInformerFactory,
 	authnInformer configv1informers.AuthenticationInformer,
 	consoleOperatorInformer operatorv1informers.ConsoleInformer,
 	routeInformer routev1informers.RouteInformer,
 	ingressConfigInformer configv1informers.IngressInformer,
 	targetNSsecretsInformer corev1informers.SecretInformer,
-	configMapsInformer corev1informers.ConfigMapInformer,
 	oauthClientSwitchedInformer *util.InformerWithSwitch,
 	recorder events.Recorder,
 ) factory.Controller {
@@ -93,7 +88,6 @@ func NewOAuthClientsController(
 		routesLister:                routeInformer.Lister(),
 		ingressConfigLister:         ingressConfigInformer.Lister(),
 		targetNSSecretsLister:       targetNSsecretsInformer.Lister(),
-		configMapLister:             configMapsInformer.Lister(),
 		infrastructureConfigLister:  configInformer.Config().V1().Infrastructures().Lister(),
 		clusterVersionLister:        configInformer.Config().V1().ClusterVersions().Lister(),
 	}
@@ -137,8 +131,8 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 		return statusHandler.FlushAndReturn(err)
 	}
 
-	// Use the console base address from the config as the console URL
-	// if the ingress capability is disabled on external controlplane topology (hypershift).
+	// Use the console URL from the operator config if the ingress capability is disabled
+	// on external controlplane topology (hypershift).
 	ingressDisabled := util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig)
 
 	authnConfig, err := c.authnLister.Get(api.ConfigResourceName)
@@ -179,9 +173,9 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 		}
 		consoleURL = url
 	} else {
-		url, err := util.GetConsoleBaseAddress(ctx, c.configMapLister)
+		url, err := util.GetConsoleURLFromConfig(operatorConfig)
 		if err != nil {
-			return fmt.Errorf("failed to get console base address: %w", err)
+			return fmt.Errorf("failed to get console url: %w", err)
 		}
 		consoleURL = url
 	}

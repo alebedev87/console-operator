@@ -47,16 +47,14 @@ func DefaultConfigMap(
 	nodeOperatingSystems []string,
 	copiedCSVsDisabled bool,
 	telemeterConfig map[string]string,
-	ingressDisabled bool,
+	consoleHost string,
 ) (consoleConfigMap *corev1.ConfigMap, unsupportedOverridesHaveMerged bool, err error) {
 
 	apiServerURL := infrastructuresub.GetAPIServerURL(infrastructureConfig)
 
 	defaultBuilder := &consoleserver.ConsoleServerCLIConfigBuilder{}
-	if !ingressDisabled {
-		defaultBuilder = defaultBuilder.Host(activeConsoleRoute.Spec.Host)
-	}
-	defaultConfig, err := defaultBuilder.LogoutURL(defaultLogoutURL).
+	defaultConfig, err := defaultBuilder.Host(consoleHost).
+		LogoutURL(defaultLogoutURL).
 		Brand(DEFAULT_BRAND).
 		DocURL(DEFAULT_DOC_URL).
 		APIServerURL(apiServerURL).
@@ -74,13 +72,14 @@ func DefaultConfigMap(
 
 	extractedManagedConfig := extractYAML(managedConfig)
 	userDefinedBuilder := &consoleserver.ConsoleServerCLIConfigBuilder{}
-	if !ingressDisabled {
-		userDefinedBuilder = userDefinedBuilder.Host(activeConsoleRoute.Spec.Host).
-			CustomHostnameRedirectPort(isCustomRoute(activeConsoleRoute))
+	if activeConsoleRoute != nil {
+		userDefinedBuilder = userDefinedBuilder.CustomHostnameRedirectPort(isCustomRoute(activeConsoleRoute))
 	}
-	userDefinedConfig, err := userDefinedBuilder.LogoutURL(consoleConfig.Spec.Authentication.LogoutRedirect).
+	userDefinedConfig, err := userDefinedBuilder.Host(consoleHost).
+		LogoutURL(consoleConfig.Spec.Authentication.LogoutRedirect).
 		Brand(operatorConfig.Spec.Customization.Brand).
 		DocURL(operatorConfig.Spec.Customization.DocumentationBaseURL).
+		ConsoleURL(operatorConfig.Spec.Ingress.ConsoleURL).
 		APIServerURL(apiServerURL).
 		TopologyMode(infrastructureConfig.Status.ControlPlaneTopology).
 		Monitoring(monitoringSharedConfig).

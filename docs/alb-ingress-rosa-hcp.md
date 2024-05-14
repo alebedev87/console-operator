@@ -20,14 +20,12 @@ Note the certificate ARN, you will need it later.
 ### Create NodePort services for the console
 
 The AWS Load Balancer Controller routes the traffic between cluster nodes.
-Therefore the service needs to be exposed via a port on the node network:
+Therefore the services need to be exposed via a port on the node network:
 ```bash
 cat <<EOF | oc apply -f -
 apiVersion: v1
 kind: Service
 metadata:
-  labels:
-    app: console
   name: console-np
   namespace: openshift-console
 spec:
@@ -40,12 +38,28 @@ spec:
     app: console
     component: ui
   type: NodePort
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: downloads-np
+  namespace: openshift-console
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: console
+    component: downloads
+  type: NodePort
 EOF
 ```
 
-### Create Ingress for the console service
+### Create Ingress resources for the services
 
-Create an Ingress resource to provision an ALB:
+To provision ALBs create the following resources:
 ```bash
 cat <<EOF | oc apply -f -
 apiVersion: networking.k8s.io/v1
@@ -70,45 +84,51 @@ spec:
                 name: console-np
                 port:
                   number: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: instance
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/certificate-arn: ${CERTIFICATE_ARN}
+  name: downloads
+  namespace: openshift-console
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: downloads-np
+                port:
+                  number: 80
 EOF
 ```
 
 ### Update console config
 
-Once ALB is provisioned you need to let the console operator know which host to use.
-Create the following configmap in `openshift-config-managed` namespace to set the console base address:
+Once the console ALBs are provisioned you need to let the console operator know which hosts to use.
+Update the console operator config providing the custom urls:
 ```bash
 $ CONSOLE_ALB_HOST=$(oc -n openshift-console get ing console -o yaml | yq .status.loadBalancer.ingress[0].hostname)
-$ cat <<EOF | oc apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: console-config
-  namespace: openshift-config-managed
-data:
-  console-config.yaml: |
-    apiVersion: console.openshift.io/v1
-    kind: ConsoleConfig
-    clusterInfo:
-      consoleBaseAddress: https://${CONSOLE_ALB_HOST}
-EOF
+$ DOWNLOADS_ALB_HOST=$(oc -n openshift-console get ing downloads -o yaml | yq .status.loadBalancer.ingress[0].hostname)
+$ oc patch console.operator.openshift.io cluster --type=merge -p "{\"spec\":{\"ingress\":{\"consoleURL\":\"${CONSOLE_ALB_HOST}\",\"clientDownloadsURL\":\"${DOWNLOADS_ALB_HOST}\"}}}"
 ```
 
 ## Notes
 
 1. ROSA HCP does not have the authentication operator, the authentication server is managed centrally by the HyperShift layer:
 ```bash
-$ oc -n openshift-authentication-operator get deploy
-No resources found in openshift-authentication-operator namespace.
+$ oc -n openshift-authentication-operator get deploy,route
+No resources found
 
-$ oc -n openshift-authentication-operator get route
-No resources found in openshift-authentication-operator namespace.
-
-$ oc -n openshift-authentication get pods
-No resources found in openshift-authentication namespace.
-
-$ oc -n openshift-authentication get routes
-No resources found in openshift-authentication namespace.
+$ oc -n openshift-authentication get pods,routes
+No resources found
 
 $ oc get oauthclient | grep -v console
 NAME                           SECRET                                        WWW-CHALLENGE   TOKEN-MAX-AGE   REDIRECT URIS

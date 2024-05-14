@@ -49,6 +49,7 @@ type HealthCheckController struct {
 	ingressConfigLister        configlistersv1.IngressLister
 	operatorConfigLister       operatorv1listers.ConsoleLister
 	clusterVersionLister       configlistersv1.ClusterVersionLister
+	consoleConfigLister        configlistersv1.ConsoleLister
 }
 
 func NewHealthCheckController(
@@ -74,6 +75,7 @@ func NewHealthCheckController(
 		routeLister:                routeInformer.Lister(),
 		configMapLister:            coreInformer.ConfigMaps().Lister(),
 		clusterVersionLister:       configInformer.Config().V1().ClusterVersions().Lister(),
+		consoleConfigLister:        configInformer.Config().V1().Consoles().Lister(),
 	}
 
 	configMapInformer := coreInformer.ConfigMaps()
@@ -140,8 +142,8 @@ func (c *HealthCheckController) Sync(ctx context.Context, controllerContext fact
 		return statusHandler.FlushAndReturn(err)
 	}
 
-	// Use the console base address from the config as the ingress URI
-	// if the ingress capability is disabled on external controlplane topology (hypershift).
+	// Use the console URL from the operator config if the ingress capability is disabled
+	// on external controlplane topology (hypershift).
 	ingressDisabled := util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig)
 
 	activeRouteName := api.OpenShiftConsoleRouteName
@@ -173,17 +175,17 @@ func (c *HealthCheckController) CheckRouteHealth(ctx context.Context, operatorCo
 				url *url.URL
 				err error
 			)
-			if ingressDisabled {
-				url, err = util.GetConsoleBaseAddress(ctx, c.configMapLister)
-				if err != nil {
-					reason = "FailedLoadBaseAddress"
-					return fmt.Errorf("failed to get console base address: %w", err)
-				}
-			} else {
+			if !ingressDisabled {
 				url, _, err = routeapihelpers.IngressURI(route, route.Spec.Host)
 				if err != nil {
 					reason = "RouteNotAdmitted"
 					return fmt.Errorf("console route is not admitted")
+				}
+			} else {
+				url, err = util.GetConsoleURLFromConfig(operatorConfig)
+				if err != nil {
+					reason = "FailedGetConsoleURL"
+					return fmt.Errorf("failed to get console url: %w", err)
 				}
 			}
 
