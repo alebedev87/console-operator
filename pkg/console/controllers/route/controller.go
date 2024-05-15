@@ -20,6 +20,7 @@ import (
 	routev1 "github.com/openshift/api/route/v1"
 	configclientv1 "github.com/openshift/client-go/config/clientset/versioned/typed/config/v1"
 	configinformer "github.com/openshift/client-go/config/informers/externalversions"
+	configlistersv1 "github.com/openshift/client-go/config/listers/config/v1"
 	v1 "github.com/openshift/client-go/operator/informers/externalversions/operator/v1"
 	operatorv1listers "github.com/openshift/client-go/operator/listers/operator/v1"
 	routeclientv1 "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"

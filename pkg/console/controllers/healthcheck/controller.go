@@ -23,6 +23,7 @@ import (
 	routev1 "github.com/openshift/api/route/v1"
 	configclientv1 "github.com/openshift/client-go/config/clientset/versioned/typed/config/v1"
 	configinformer "github.com/openshift/client-go/config/informers/externalversions"
+	configlistersv1 "github.com/openshift/client-go/config/listers/config/v1"
 	v1 "github.com/openshift/client-go/operator/informers/externalversions/operator/v1"
 	operatorv1listers "github.com/openshift/client-go/operator/listers/operator/v1"
 	routeclientv1 "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
@@ -47,11 +48,10 @@ type HealthCheckController struct {
 	routeClient          routeclientv1.RoutesGetter
 	configMapClient      coreclientv1.ConfigMapsGetter
 	// listers
-	infrastructureConfigLister configlistersv1.InfrastructureLister
-	ingressConfigLister        configlistersv1.IngressLister
-	operatorConfigLister       operatorv1listers.ConsoleLister
-	clusterVersionLister       configlistersv1.ClusterVersionLister
-	consoleConfigLister        configlistersv1.ConsoleLister
+	ingressConfigLister  configlistersv1.IngressLister
+	operatorConfigLister operatorv1listers.ConsoleLister
+	clusterVersionLister configlistersv1.ClusterVersionLister
+	consoleConfigLister  configlistersv1.ConsoleLister
 }
 
 func NewHealthCheckController(
@@ -72,17 +72,15 @@ func NewHealthCheckController(
 	ctrl := &HealthCheckController{
 		// clients
 		operatorClient:       operatorClient,
-		operatorConfigLister: operatorConfigInformer.Lister(),
 		infrastructureClient: configClient.Infrastructures(),
 		ingressClient:        configClient.Ingresses(),
 		routeClient:          routev1Client,
 		configMapClient:      configMapClient,
 		// listers
-		operatorConfigLister:       operatorConfigInformer.Lister(),
-		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
-		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
-		clusterVersionLister:       configInformer.Config().V1().ClusterVersions().Lister(),
-		consoleConfigLister:        configInformer.Config().V1().Consoles().Lister(),
+		operatorConfigLister: operatorConfigInformer.Lister(),
+		ingressConfigLister:  configInformer.Config().V1().Ingresses().Lister(),
+		clusterVersionLister: configInformer.Config().V1().ClusterVersions().Lister(),
+		consoleConfigLister:  configInformer.Config().V1().Consoles().Lister(),
 	}
 
 	configMapInformer := coreInformer.ConfigMaps()

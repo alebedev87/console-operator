@@ -18,6 +18,7 @@ import (
 	// openshift
 	v1 "github.com/openshift/api/console/v1"
 	operatorsv1 "github.com/openshift/api/operator/v1"
+	configlistersv1 "github.com/openshift/client-go/config/listers/config/v1"
 	operatorv1listers "github.com/openshift/client-go/operator/listers/operator/v1"
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
@@ -50,7 +51,6 @@ type CLIDownloadsSyncController struct {
 	consoleCliDownloadsClient consoleclientv1.ConsoleCLIDownloadInterface
 	ingressClient             configclientv1.IngressInterface
 	routeClient               routeclientv1.RoutesGetter
-	operatorConfigLister      operatorv1listers.ConsoleLister
 	// listers
 	ingressConfigLister        configlistersv1.IngressLister
 	operatorConfigLister       operatorv1listers.ConsoleLister
@@ -80,7 +80,6 @@ func NewCLIDownloadsSyncController(
 		consoleCliDownloadsClient: cliDownloadsInterface,
 		ingressClient:             configClient.Ingresses(),
 		routeClient:               routeClient,
-		operatorConfigLister:      operatorConfigInformer.Lister(),
 		// listers
 		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
 		operatorConfigLister:       operatorConfigInformer.Lister(),
@@ -159,7 +158,7 @@ func (c *CLIDownloadsSyncController) Sync(ctx context.Context, controllerContext
 			activeRouteName = api.OpenshiftDownloadsCustomRouteName
 		}
 
-		downloadsRoute, downloadsRouteErr := c.routeLister.Routes(api.TargetNamespace).Get(activeRouteName)
+		downloadsRoute, downloadsRouteErr := c.routeClient.Routes(api.TargetNamespace).Get(ctx, activeRouteName, metav1.GetOptions{})
 		if downloadsRouteErr != nil {
 			return downloadsRouteErr
 		}
