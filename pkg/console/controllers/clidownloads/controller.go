@@ -37,7 +37,7 @@ import (
 	// clients
 	consoleclientv1 "github.com/openshift/client-go/console/clientset/versioned/typed/console/v1"
 
-	// console-operator
+	// operator
 	"github.com/openshift/console-operator/pkg/api"
 	controllersutil "github.com/openshift/console-operator/pkg/console/controllers/util"
 	"github.com/openshift/console-operator/pkg/console/status"
@@ -47,12 +47,9 @@ import (
 
 type CLIDownloadsSyncController struct {
 	// clients
-	operatorClient            v1helpers.OperatorClient
-	consoleCliDownloadsClient consoleclientv1.ConsoleCLIDownloadInterface
-	routeLister               routev1listers.RouteLister
-	ingressConfigLister       configlistersv1.IngressLister
-	operatorConfigLister      operatorv1listers.ConsoleLister
-	// listers
+	operatorClient             v1helpers.OperatorClient
+	consoleCliDownloadsClient  consoleclientv1.ConsoleCLIDownloadInterface
+	routeLister                routev1listers.RouteLister
 	ingressConfigLister        configlistersv1.IngressLister
 	operatorConfigLister       operatorv1listers.ConsoleLister
 	infrastructureConfigLister configlistersv1.InfrastructureLister
@@ -76,12 +73,9 @@ func NewCLIDownloadsSyncController(
 
 	ctrl := &CLIDownloadsSyncController{
 		// clients
-		operatorClient:            operatorClient,
-		consoleCliDownloadsClient: cliDownloadsInterface,
-		routeLister:               routeInformer.Lister(),
-		ingressConfigLister:       configInformer.Config().V1().Ingresses().Lister(),
-		operatorConfigLister:      operatorConfigInformer.Lister(),
-		// listers
+		operatorClient:             operatorClient,
+		consoleCliDownloadsClient:  cliDownloadsInterface,
+		routeLister:                routeInformer.Lister(),
 		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
 		operatorConfigLister:       operatorConfigInformer.Lister(),
 		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
@@ -128,13 +122,11 @@ func (c *CLIDownloadsSyncController) Sync(ctx context.Context, controllerContext
 
 	infrastructureConfig, err := c.infrastructureConfigLister.Get(api.ConfigResourceName)
 	if err != nil {
-		klog.Errorf("infrastructure config error: %v", err)
 		return statusHandler.FlushAndReturn(err)
 	}
 
 	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
 	if err != nil {
-		klog.Errorf("cluster version config error: %v", err)
 		return statusHandler.FlushAndReturn(err)
 	}
 
@@ -149,7 +141,6 @@ func (c *CLIDownloadsSyncController) Sync(ctx context.Context, controllerContext
 	if !ingressDisabled {
 		ingressConfig, err := c.ingressConfigLister.Get(api.ConfigResourceName)
 		if err != nil {
-			klog.Errorf("ingress config error: %v", err)
 			return statusHandler.FlushAndReturn(err)
 		}
 

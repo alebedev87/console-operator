@@ -40,9 +40,8 @@ type RouteSyncController struct {
 	routeName            string
 	isHealthCheckEnabled bool
 	// clients
-	operatorClient v1helpers.OperatorClient
-	routeClient    routeclientv1.RoutesGetter
-	// listers
+	operatorClient             v1helpers.OperatorClient
+	routeClient                routeclientv1.RoutesGetter
 	operatorConfigLister       operatorv1listers.ConsoleLister
 	ingressConfigLister        configlistersv1.IngressLister
 	secretLister               corev1listers.SecretLister
@@ -66,14 +65,12 @@ func NewRouteSyncController(
 	recorder events.Recorder,
 ) factory.Controller {
 	ctrl := &RouteSyncController{
-		routeName:            routeName,
-		isHealthCheckEnabled: isHealthCheckEnabled,
-		// clients
-		operatorClient: operatorClient,
-		routeClient:    routev1Client,
-		// listers
+		routeName:                  routeName,
+		isHealthCheckEnabled:       isHealthCheckEnabled,
+		operatorClient:             operatorClient,
 		operatorConfigLister:       operatorConfigInformer.Lister(),
 		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
+		routeClient:                routev1Client,
 		secretLister:               secretInformer.Lister(),
 		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
 		clusterVersionLister:       configInformer.Config().V1().ClusterVersions().Lister(),

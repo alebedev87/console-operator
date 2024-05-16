@@ -41,8 +41,7 @@ import (
 
 type HealthCheckController struct {
 	// clients
-	operatorClient v1helpers.OperatorClient
-	// listers
+	operatorClient             v1helpers.OperatorClient
 	infrastructureConfigLister configlistersv1.InfrastructureLister
 	configMapLister            corev1listers.ConfigMapLister
 	routeLister                routev1listers.RouteLister
@@ -67,8 +66,7 @@ func NewHealthCheckController(
 ) factory.Controller {
 	ctrl := &HealthCheckController{
 		// clients
-		operatorClient: operatorClient,
-		// listers
+		operatorClient:             operatorClient,
 		operatorConfigLister:       operatorConfigInformer.Lister(),
 		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
 		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),

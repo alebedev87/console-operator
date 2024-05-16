@@ -48,11 +48,9 @@ import (
 //		- type=OAuthClientSyncProgressing
 //		- type=OAuthClientSyncDegraded
 type oauthClientsController struct {
-	// clients
 	oauthClient    oauthv1client.OAuthClientsGetter
 	operatorClient v1helpers.OperatorClient
 
-	// listers
 	oauthClientLister           oauthv1lister.OAuthClientLister
 	oauthClientSwitchedInformer *util.InformerWithSwitch
 	authnLister                 configv1lister.AuthenticationLister
@@ -121,13 +119,11 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 
 	infrastructureConfig, err := c.infrastructureConfigLister.Get(api.ConfigResourceName)
 	if err != nil {
-		klog.Errorf("infrastructure config error: %v", err)
 		return statusHandler.FlushAndReturn(err)
 	}
 
 	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
 	if err != nil {
-		klog.Errorf("cluster version config error: %v", err)
 		return statusHandler.FlushAndReturn(err)
 	}
 
