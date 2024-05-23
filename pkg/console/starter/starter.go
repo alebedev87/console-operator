@@ -260,8 +260,6 @@ func RunOperator(ctx context.Context, controllerContext *controllercmd.Controlle
 	oauthClientController := oauthclients.NewOAuthClientsController(
 		operatorClient,
 		oauthClient,
-		configClient.ConfigV1(),
-		configInformers,
 		configInformers.Config().V1().Authentications(),
 		operatorConfigInformers.Operator().V1().Consoles(),
 		routesInformersNamespaced.Route().V1().Routes(),

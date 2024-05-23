@@ -3,7 +3,6 @@ package util
 import (
 	"context"
 	"fmt"
-	"net/url"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -98,28 +97,4 @@ func IsExternalControlPlaneWithIngressDisabled(infrastructureConfig *configv1.In
 	}
 
 	return infrastructureConfig.Status.ControlPlaneTopology == configv1.ExternalTopologyMode && !isIngressCapabilityEnabled
-}
-
-// GetConsoleURLFromConfig returns the custom console url from operator configuration.
-func GetConsoleURLFromConfig(operatorConfig *operatorv1.Console) (*url.URL, error) {
-	if len(operatorConfig.Spec.Ingress.ConsoleURL) == 0 {
-		return nil, fmt.Errorf("console url not found")
-	}
-	url, err := url.Parse(operatorConfig.Spec.Ingress.ConsoleURL)
-	if err != nil {
-		return nil, err
-	}
-	return url, nil
-}
-
-// GetDownloadsURLFromConfig returns the custom downloads url from operator configuration.
-func GetDownloadsURLFromConfig(operatorConfig *operatorv1.Console) (*url.URL, error) {
-	if len(operatorConfig.Spec.Ingress.ClientDownloadsURL) == 0 {
-		return nil, fmt.Errorf("downloads url not found")
-	}
-	url, err := url.Parse(operatorConfig.Spec.Ingress.ClientDownloadsURL)
-	if err != nil {
-		return nil, err
-	}
-	return url, nil
 }

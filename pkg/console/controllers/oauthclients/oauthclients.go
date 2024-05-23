@@ -16,8 +16,6 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	operatorv1 "github.com/openshift/api/operator/v1"
-	configclientv1 "github.com/openshift/client-go/config/clientset/versioned/typed/config/v1"
-	configinformer "github.com/openshift/client-go/config/informers/externalversions"
 	configv1informers "github.com/openshift/client-go/config/informers/externalversions/config/v1"
 	configv1lister "github.com/openshift/client-go/config/listers/config/v1"
 	oauthclient "github.com/openshift/client-go/oauth/clientset/versioned"
@@ -58,15 +56,11 @@ type oauthClientsController struct {
 	routesLister                routev1listers.RouteLister
 	ingressConfigLister         configv1lister.IngressLister
 	targetNSSecretsLister       corev1listers.SecretLister
-	infrastructureConfigLister  configv1lister.InfrastructureLister
-	clusterVersionLister        configv1lister.ClusterVersionLister
 }
 
 func NewOAuthClientsController(
 	operatorClient v1helpers.OperatorClient,
 	oauthClient oauthclient.Interface,
-	configClient configclientv1.ConfigV1Interface,
-	configInformer configinformer.SharedInformerFactory,
 	authnInformer configv1informers.AuthenticationInformer,
 	consoleOperatorInformer operatorv1informers.ConsoleInformer,
 	routeInformer routev1informers.RouteInformer,
@@ -86,8 +80,6 @@ func NewOAuthClientsController(
 		routesLister:                routeInformer.Lister(),
 		ingressConfigLister:         ingressConfigInformer.Lister(),
 		targetNSSecretsLister:       targetNSsecretsInformer.Lister(),
-		infrastructureConfigLister:  configInformer.Config().V1().Infrastructures().Lister(),
-		clusterVersionLister:        configInformer.Config().V1().ClusterVersions().Lister(),
 	}
 
 	return factory.New().
@@ -117,20 +109,6 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
 
-	infrastructureConfig, err := c.infrastructureConfigLister.Get(api.ConfigResourceName)
-	if err != nil {
-		return statusHandler.FlushAndReturn(err)
-	}
-
-	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
-	if err != nil {
-		return statusHandler.FlushAndReturn(err)
-	}
-
-	// Use the console URL from the operator config if the ingress capability is disabled
-	// on external controlplane topology (hypershift).
-	ingressDisabled := util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig)
-
 	authnConfig, err := c.authnLister.Get(api.ConfigResourceName)
 	if err != nil {
 		return err
@@ -156,7 +134,7 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 
 	var consoleURL *url.URL
 
-	if !ingressDisabled {
+	if len(operatorConfig.Spec.Ingress.ConsoleURL) == 0 {
 		routeName := api.OpenShiftConsoleRouteName
 		routeConfig := routesub.NewRouteConfig(operatorConfig, ingressConfig, routeName)
 		if routeConfig.IsCustomHostnameSet() {
@@ -169,9 +147,9 @@ func (c *oauthClientsController) sync(ctx context.Context, controllerContext fac
 		}
 		consoleURL = url
 	} else {
-		url, err := util.GetConsoleURLFromConfig(operatorConfig)
+		url, err := url.Parse(operatorConfig.Spec.Ingress.ConsoleURL)
 		if err != nil {
-			return fmt.Errorf("failed to get console url: %w", err)
+			return fmt.Errorf("failed to parse console url: %w", err)
 		}
 		consoleURL = url
 	}

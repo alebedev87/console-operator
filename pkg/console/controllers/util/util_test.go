@@ -8,7 +8,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	configv1 "github.com/openshift/api/config/v1"
-	operatorv1 "github.com/openshift/api/operator/v1"
 )
 
 var (
@@ -222,84 +221,6 @@ func TestIsExternalControlPlaneWithIngressDisabled(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if diff := deep.Equal(IsExternalControlPlaneWithIngressDisabled(tt.args.infraConfig, tt.args.clusterVersion), tt.want); diff != nil {
 				t.Error(diff)
-			}
-		})
-	}
-}
-
-func TestGetConsoleURLFromConfig(t *testing.T) {
-	type args struct {
-		config *operatorv1.Console
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    string
-		wantErr bool
-	}{
-		{
-			name: "Test nominal",
-			args: args{
-				config: &operatorv1.Console{
-					Spec: operatorv1.ConsoleSpec{
-						Ingress: operatorv1.Ingress{
-							ConsoleURL: "https://example.com",
-						},
-					},
-				},
-			},
-			want: "https://example.com",
-		},
-		{
-			name: "Test nominal",
-			args: args{
-				config: &operatorv1.Console{
-					Spec: operatorv1.ConsoleSpec{
-						Ingress: operatorv1.Ingress{
-							ConsoleURL: "https://example.com",
-						},
-					},
-				},
-			},
-			want: "https://example.com",
-		},
-		{
-			name: "Test empty",
-			args: args{
-				config: &operatorv1.Console{
-					Spec: operatorv1.ConsoleSpec{},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "Test invalid",
-			args: args{
-				config: &operatorv1.Console{
-					Spec: operatorv1.ConsoleSpec{
-						Ingress: operatorv1.Ingress{
-							ConsoleURL: ":::invalid-url:::",
-						},
-					},
-				},
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := GetConsoleURLFromConfig(tt.args.config)
-			if err != nil {
-				if !tt.wantErr {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				return
-			} else if tt.wantErr {
-				t.Fatal("error expected but not received")
-			}
-			if diff := deep.Equal(got.String(), tt.want); diff != nil {
-				t.Fatal(diff)
 			}
 		})
 	}

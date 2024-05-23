@@ -47,8 +47,6 @@ type HealthCheckController struct {
 	routeLister                routev1listers.RouteLister
 	ingressConfigLister        configlistersv1.IngressLister
 	operatorConfigLister       operatorv1listers.ConsoleLister
-	clusterVersionLister       configlistersv1.ClusterVersionLister
-	consoleConfigLister        configlistersv1.ConsoleLister
 }
 
 func NewHealthCheckController(
@@ -65,15 +63,12 @@ func NewHealthCheckController(
 	recorder events.Recorder,
 ) factory.Controller {
 	ctrl := &HealthCheckController{
-		// clients
 		operatorClient:             operatorClient,
 		operatorConfigLister:       operatorConfigInformer.Lister(),
 		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
 		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
 		routeLister:                routeInformer.Lister(),
 		configMapLister:            coreInformer.ConfigMaps().Lister(),
-		clusterVersionLister:       configInformer.Config().V1().ClusterVersions().Lister(),
-		consoleConfigLister:        configInformer.Config().V1().Consoles().Lister(),
 	}
 
 	configMapInformer := coreInformer.ConfigMaps()
@@ -84,7 +79,6 @@ func NewHealthCheckController(
 			util.IncludeNamesFilter(api.ConfigResourceName),
 			operatorConfigInformer.Informer(),
 			configV1Informers.Ingresses().Informer(),
-			configV1Informers.Infrastructures().Informer(),
 		).WithFilteredEventsInformers( // service
 		util.IncludeNamesFilter(api.TrustedCAConfigMapName, api.OAuthServingCertConfigMapName),
 		configMapInformer.Informer(),
@@ -134,16 +128,6 @@ func (c *HealthCheckController) Sync(ctx context.Context, controllerContext fact
 		return nil
 	}
 
-	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
-	if err != nil {
-		klog.Errorf("cluster version config error: %v", err)
-		return statusHandler.FlushAndReturn(err)
-	}
-
-	// Use the console URL from the operator config if the ingress capability is disabled
-	// on external controlplane topology (hypershift).
-	ingressDisabled := util.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig)
-
 	activeRouteName := api.OpenShiftConsoleRouteName
 	routeConfig := routesub.NewRouteConfig(updatedOperatorConfig, ingressConfig, activeRouteName)
 	if routeConfig.IsCustomHostnameSet() {
@@ -156,14 +140,14 @@ func (c *HealthCheckController) Sync(ctx context.Context, controllerContext fact
 		return statusHandler.FlushAndReturn(activeRouteErr)
 	}
 
-	routeHealthCheckErrReason, routeHealthCheckErr := c.CheckRouteHealth(ctx, updatedOperatorConfig, activeRoute, ingressDisabled)
+	routeHealthCheckErrReason, routeHealthCheckErr := c.CheckRouteHealth(ctx, updatedOperatorConfig, activeRoute)
 	statusHandler.AddCondition(status.HandleDegraded("RouteHealth", routeHealthCheckErrReason, routeHealthCheckErr))
 	statusHandler.AddCondition(status.HandleAvailable("RouteHealth", routeHealthCheckErrReason, routeHealthCheckErr))
 
 	return statusHandler.FlushAndReturn(routeHealthCheckErr)
 }
 
-func (c *HealthCheckController) CheckRouteHealth(ctx context.Context, operatorConfig *operatorsv1.Console, route *routev1.Route, ingressDisabled bool) (string, error) {
+func (c *HealthCheckController) CheckRouteHealth(ctx context.Context, operatorConfig *operatorsv1.Console, route *routev1.Route) (string, error) {
 	var reason string
 	err := retry.OnError(
 		retry.DefaultRetry,
@@ -173,17 +157,17 @@ func (c *HealthCheckController) CheckRouteHealth(ctx context.Context, operatorCo
 				url *url.URL
 				err error
 			)
-			if !ingressDisabled {
+			if len(operatorConfig.Spec.Ingress.ConsoleURL) == 0 {
 				url, _, err = routeapihelpers.IngressURI(route, route.Spec.Host)
 				if err != nil {
 					reason = "RouteNotAdmitted"
 					return fmt.Errorf("console route is not admitted")
 				}
 			} else {
-				url, err = util.GetConsoleURLFromConfig(operatorConfig)
+				url, err = url.Parse(operatorConfig.Spec.Ingress.ConsoleURL)
 				if err != nil {
-					reason = "FailedGetConsoleURL"
-					return fmt.Errorf("failed to get console url: %w", err)
+					reason = "FailedParseConsoleURL"
+					return fmt.Errorf("failed to parse console url: %w", err)
 				}
 			}
 

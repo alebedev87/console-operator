@@ -47,13 +47,11 @@ import (
 
 type CLIDownloadsSyncController struct {
 	// clients
-	operatorClient             v1helpers.OperatorClient
-	consoleCliDownloadsClient  consoleclientv1.ConsoleCLIDownloadInterface
-	routeLister                routev1listers.RouteLister
-	ingressConfigLister        configlistersv1.IngressLister
-	operatorConfigLister       operatorv1listers.ConsoleLister
-	infrastructureConfigLister configlistersv1.InfrastructureLister
-	clusterVersionLister       configlistersv1.ClusterVersionLister
+	operatorClient            v1helpers.OperatorClient
+	consoleCliDownloadsClient consoleclientv1.ConsoleCLIDownloadInterface
+	routeLister               routev1listers.RouteLister
+	ingressConfigLister       configlistersv1.IngressLister
+	operatorConfigLister      operatorv1listers.ConsoleLister
 }
 
 func NewCLIDownloadsSyncController(
@@ -73,13 +71,11 @@ func NewCLIDownloadsSyncController(
 
 	ctrl := &CLIDownloadsSyncController{
 		// clients
-		operatorClient:             operatorClient,
-		consoleCliDownloadsClient:  cliDownloadsInterface,
-		routeLister:                routeInformer.Lister(),
-		ingressConfigLister:        configInformer.Config().V1().Ingresses().Lister(),
-		operatorConfigLister:       operatorConfigInformer.Lister(),
-		infrastructureConfigLister: configInformer.Config().V1().Infrastructures().Lister(),
-		clusterVersionLister:       configInformer.Config().V1().ClusterVersions().Lister(),
+		operatorClient:            operatorClient,
+		consoleCliDownloadsClient: cliDownloadsInterface,
+		routeLister:               routeInformer.Lister(),
+		ingressConfigLister:       configInformer.Config().V1().Ingresses().Lister(),
+		operatorConfigLister:      operatorConfigInformer.Lister(),
 	}
 
 	configV1Informers := configInformer.Config().V1()
@@ -120,25 +116,11 @@ func (c *CLIDownloadsSyncController) Sync(ctx context.Context, controllerContext
 
 	statusHandler := status.NewStatusHandler(c.operatorClient)
 
-	infrastructureConfig, err := c.infrastructureConfigLister.Get(api.ConfigResourceName)
-	if err != nil {
-		return statusHandler.FlushAndReturn(err)
-	}
-
-	clusterVersionConfig, err := c.clusterVersionLister.Get("version")
-	if err != nil {
-		return statusHandler.FlushAndReturn(err)
-	}
-
-	// Disable the client download check for external control plane topology (hypershift) if the ingress capability is disabled.
-	ingressDisabled := controllersutil.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig)
-
 	var (
 		downloadsURI *url.URL
 		downloadsErr error
 	)
-
-	if !ingressDisabled {
+	if len(operatorConfig.Spec.Ingress.ClientDownloadsURL) == 0 {
 		ingressConfig, err := c.ingressConfigLister.Get(api.ConfigResourceName)
 		if err != nil {
 			return statusHandler.FlushAndReturn(err)
@@ -160,9 +142,9 @@ func (c *CLIDownloadsSyncController) Sync(ctx context.Context, controllerContext
 			return downloadsErr
 		}
 	} else {
-		downloadsURI, downloadsErr = controllersutil.GetDownloadsURLFromConfig(operatorConfig)
+		downloadsURI, downloadsErr = url.Parse(operatorConfig.Spec.Ingress.ClientDownloadsURL)
 		if downloadsErr != nil {
-			return fmt.Errorf("failed to get downloads url: %w", downloadsErr)
+			return fmt.Errorf("failed to parse downloads url: %w", downloadsErr)
 		}
 	}
 

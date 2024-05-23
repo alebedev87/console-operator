@@ -142,7 +142,7 @@ $ oc -n openshift-console rsh deploy/console curl -k https://openshift.default.s
 "token_endpoint": "https://oauth.mytestcluster.5199.s3.devshift.org:443/oauth/token",
 ```
 
-2. When the ingress capability is disabled, the console operator relies on the console base address for health checks and oauthclient instead of the route.
+2. When the ingress capability is disabled, the console operator relies on the end user to provide the console and download URLs (using the operator API) for health checks and oauthclient.
 
 3. When the ingress capability is disabled, the console operator skips the implementation of the component route customization.
 

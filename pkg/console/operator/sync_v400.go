@@ -32,7 +32,6 @@ import (
 
 	// operator
 	"github.com/openshift/console-operator/pkg/api"
-	ctrlutil "github.com/openshift/console-operator/pkg/console/controllers/util"
 	customerrors "github.com/openshift/console-operator/pkg/console/errors"
 	"github.com/openshift/console-operator/pkg/console/metrics"
 	"github.com/openshift/console-operator/pkg/console/status"
@@ -61,21 +60,7 @@ func (co *consoleOperator) sync_v400(ctx context.Context, controllerContext fact
 		consoleURL   *url.URL
 	)
 
-	infrastructureConfig, err := co.infrastructureLister.Get(api.ConfigResourceName)
-	if err != nil {
-		return statusHandler.FlushAndReturn(err)
-	}
-
-	clusterVersionConfig, err := co.clusterVersionLister.Get("version")
-	if err != nil {
-		return statusHandler.FlushAndReturn(err)
-	}
-
-	// Use the console URL from the operator config if the ingress capability is disabled
-	// on external controlplane topology (hypershift).
-	ingressDisabled := ctrlutil.IsExternalControlPlaneWithIngressDisabled(infrastructureConfig, clusterVersionConfig)
-
-	if !ingressDisabled {
+	if len(set.Operator.Spec.Ingress.ConsoleURL) == 0 {
 		routeName := api.OpenShiftConsoleRouteName
 		routeConfig := routesub.NewRouteConfig(updatedOperatorConfig, set.Ingress, routeName)
 		if routeConfig.IsCustomHostnameSet() {
@@ -97,7 +82,7 @@ func (co *consoleOperator) sync_v400(ctx context.Context, controllerContext fact
 		consoleRoute = route
 		consoleURL = url
 	} else {
-		url, err := ctrlutil.GetConsoleURLFromConfig(set.Operator)
+		url, err := url.Parse(set.Operator.Spec.Ingress.ConsoleURL)
 		if err != nil {
 			return statusHandler.FlushAndReturn(fmt.Errorf("failed to get console url: %w", err))
 		}
