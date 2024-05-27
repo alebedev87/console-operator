@@ -463,28 +463,34 @@ spec:
                 properties:
                   clientDownloadsURL:
                     description: clientDownloadsURL is a URL to be used as the address
-                      to download client binaries. This field is intended for clusters
+                      to download client binaries. If not specified, the downloads
+                      route hostname will be used. This field is required for clusters
                       without ingress capability, where access to routes is not possible.
-                      Must use the HTTPS scheme.
+                      The console operator will monitor the URL and may go degraded
+                      if it's unreachable for an extended period. Must use the HTTPS
+                      scheme.
                     maxLength: 1024
                     type: string
                     x-kubernetes-validations:
                     - message: client downloads url must be a valid absolute URL
-                      rule: isURL(self)
+                      rule: size(self) == 0 || isURL(self)
                     - message: client downloads url scheme must be https
-                      rule: url(self).getScheme() == 'https'
+                      rule: size(self) == 0 || url(self).getScheme() == 'https'
                   consoleURL:
                     description: consoleURL is a URL to be used as the base console
-                      address. This field is intended for clusters without ingress
-                      capability, where access to routes is not possible. Must use
-                      the HTTPS scheme.
+                      address. If not specified, the console route hostname will be
+                      used. This field is required for clusters without ingress capability,
+                      where access to routes is not possible. Make sure that appropriate
+                      ingress is set up at this URL. The console operator will monitor
+                      the URL and may go degraded if it's unreachable for an extended
+                      period. Must use the HTTPS scheme.
                     maxLength: 1024
                     type: string
                     x-kubernetes-validations:
                     - message: console url must be a valid absolute URL
-                      rule: isURL(self)
+                      rule: size(self) == 0 || isURL(self)
                     - message: console url scheme must be https
-                      rule: url(self).getScheme() == 'https'
+                      rule: size(self) == 0 || url(self).getScheme() == 'https'
                 type: object
               logLevel:
                 default: Normal
